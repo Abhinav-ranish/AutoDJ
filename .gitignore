@@ -1,0 +1,35 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Node / UI
+ui/node_modules/
+ui/dist/
+ui/dist-ssr/
+ui/dev-dist/
+ui/.env
+ui/.env.*
+ui/npm-debug.log*
+ui/yarn-debug.log*
+ui/yarn-error.log*
+ui/.pnpm-debug.log*
+
+# Tauri
+crates/autodj-app/target/
+crates/autodj-app/gen/
+
+# OS
+.DS_Store
+Thumbs.db
+*.icloud
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Project Specific
+.agents/
+/tmp/
