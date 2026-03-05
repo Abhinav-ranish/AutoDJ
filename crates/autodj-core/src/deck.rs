@@ -202,27 +202,25 @@ impl Default for Deck {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::TrackBuffer;
+    use crate::buffer::{AdjpHeader, TrackBuffer};
 
-    /// Create a tiny test TrackBuffer in memory.
+    /// Create a test TrackBuffer with the given number of stereo frames.
     fn make_test_buffer(frames: usize) -> Arc<TrackBuffer> {
         use std::io::Write;
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_path_buf();
 
-        // Write ADJP header + sample data
+        let total_samples = frames * 2; // stereo
+        let header = AdjpHeader {
+            sample_rate: 48000,
+            channels: 2,
+            bit_depth: 32,
+            total_samples: total_samples as u64,
+            duration_ms: (frames as u64 * 1000) / 48000,
+        };
+
         let mut f = std::fs::File::create(&path).unwrap();
-        // Magic "ADJP"
-        f.write_all(b"ADJP").unwrap();
-        // Version: 1u32 LE
-        f.write_all(&1u32.to_le_bytes()).unwrap();
-        // Sample rate: 48000u32 LE
-        f.write_all(&48000u32.to_le_bytes()).unwrap();
-        // Channels: 2u16 LE
-        f.write_all(&2u16.to_le_bytes()).unwrap();
-        // Reserved: 14 bytes
-        f.write_all(&[0u8; 14]).unwrap();
-        // Sample data: frames * 2 channels * 4 bytes
+        f.write_all(&header.to_bytes()).unwrap();
         for i in 0..frames {
             let val = (i as f32) / (frames as f32);
             f.write_all(&val.to_le_bytes()).unwrap(); // L
@@ -231,7 +229,7 @@ mod tests {
         drop(f);
 
         let buf = TrackBuffer::open(&path).unwrap();
-        // Keep tempfile alive by leaking it (test only)
+        assert_eq!(buf.total_frames(), frames);
         std::mem::forget(tmp);
         Arc::new(buf)
     }
@@ -245,7 +243,7 @@ mod tests {
         deck.seek(500);
         assert_eq!(deck.position, 500);
 
-        // Seek past end should clamp
+        // Seek past end should clamp to last frame
         deck.seek(99999);
         assert_eq!(deck.position, 999);
     }
@@ -261,14 +259,16 @@ mod tests {
         deck.set_loop(100, 200);
         assert!(deck.loop_active());
 
-        // Advance past loop end
-        deck.seek(198);
-        deck.next_frame(); // 198 → 199
-        deck.next_frame(); // 199 → should be 200, which triggers loop → 100
-        // After the loop wrap, position should be around 100-101
+        // Seek right before loop end and advance past it
+        deck.seek(199);
+        // position = 199, next_frame reads 199 and advances to 200
+        deck.next_frame();
+        // Now position = 200, which is >= loop_end, so next call wraps
+        deck.next_frame();
+        // After wrap: position was set to 100, then read and advanced to 101
         assert!(
             deck.position >= 100 && deck.position <= 102,
-            "Expected ~100, got {}",
+            "Expected ~101, got {}",
             deck.position
         );
     }
