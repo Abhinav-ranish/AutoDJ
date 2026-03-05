@@ -70,6 +70,10 @@ pub enum Command {
     Pause { deck: DeckId },
     Seek { deck: DeckId, beat: u64 },
 
+    // -- Loop --
+    SetLoop { deck: DeckId, start_beat: u64, length_bars: u32 },
+    ClearLoop { deck: DeckId },
+
     // -- Mixer --
     SetCrossfader { position: f32 },
     SetDeckGain { deck: DeckId, gain_db: f32 },
@@ -141,6 +145,13 @@ impl CommandValidator {
                 })
             }
             // All other commands pass through unchanged.
+            Command::SetLoop { deck, start_beat, length_bars } => {
+                Some(Command::SetLoop {
+                    deck,
+                    start_beat,
+                    length_bars: length_bars.clamp(1, 64),
+                })
+            }
             other => Some(other),
         }
     }
