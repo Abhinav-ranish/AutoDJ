@@ -181,6 +181,56 @@ pub fn set_filter(deck: String, cutoff_hz: f32, resonance: f32, state: State<'_,
     Ok(())
 }
 
+/// Seek a deck to a position in milliseconds.
+#[tauri::command]
+pub fn seek(deck: String, position_ms: u64, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    // Convert ms to beats approximately (will be refined with track analysis)
+    // For now: beat = ms * bpm / 60000
+    let bpm = 128.0; // default; ideally get from engine state
+    let beat = (position_ms as f64 * bpm / 60000.0) as u64;
+    state.send_command(
+        Command::Seek { deck: deck_id, beat },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Set a loop on a deck.
+#[tauri::command]
+pub fn set_loop(deck: String, length_bars: u32, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    // Start beat = current position (approximate); the engine will handle it
+    // For now, use beat 0 — the UI will refine this
+    state.send_command(
+        Command::SetLoop { deck: deck_id, start_beat: 0, length_bars },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Clear the loop on a deck.
+#[tauri::command]
+pub fn clear_loop(deck: String, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::ClearLoop { deck: deck_id },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Set the tempo (BPM) for a deck.
+#[tauri::command]
+pub fn set_tempo(deck: String, bpm: f64, state: State<'_, AppState>) -> Result<(), String> {
+    let _deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::SetTempo { deck: _deck_id, bpm },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
 /// Get the current engine state snapshot.
 #[tauri::command]
 pub fn get_engine_state(state: State<'_, AppState>) -> Result<Option<EngineStateSnapshot>, String> {

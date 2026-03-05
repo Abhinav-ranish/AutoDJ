@@ -23,6 +23,9 @@ export interface DeckSnapshot {
     eq_high: number;
     filter_cutoff: number;
     filter_resonance: number;
+    loop_active: boolean;
+    loop_start_ms: number;
+    loop_end_ms: number;
 }
 
 export interface EngineState {
@@ -47,10 +50,14 @@ interface DJStore {
     loadTrack: (deck: string, trackId: string) => Promise<void>;
     play: (deck: string) => Promise<void>;
     pause: (deck: string) => Promise<void>;
+    seek: (deck: string, positionMs: number) => Promise<void>;
     setCrossfader: (position: number) => Promise<void>;
     setDeckGain: (deck: string, gainDb: number) => Promise<void>;
     setEq: (deck: string, band: string, gainDb: number) => Promise<void>;
     setFilter: (deck: string, cutoffHz: number, resonance: number) => Promise<void>;
+    setLoop: (deck: string, lengthBars: number) => Promise<void>;
+    clearLoop: (deck: string) => Promise<void>;
+    setTempo: (deck: string, bpm: number) => Promise<void>;
     pollEngineState: () => Promise<void>;
     setActiveView: (view: "dj" | "library") => void;
 }
@@ -106,6 +113,14 @@ export const useStore = create<DJStore>((set, get) => ({
         }
     },
 
+    seek: async (deck: string, positionMs: number) => {
+        try {
+            await invoke("seek", { deck, positionMs });
+        } catch (e) {
+            console.error("Seek failed:", e);
+        }
+    },
+
     setCrossfader: async (position: number) => {
         try {
             await invoke("set_crossfader", { position });
@@ -135,6 +150,30 @@ export const useStore = create<DJStore>((set, get) => ({
             await invoke("set_filter", { deck, cutoffHz, resonance });
         } catch (e) {
             console.error("Filter failed:", e);
+        }
+    },
+
+    setLoop: async (deck: string, lengthBars: number) => {
+        try {
+            await invoke("set_loop", { deck, lengthBars });
+        } catch (e) {
+            console.error("Loop failed:", e);
+        }
+    },
+
+    clearLoop: async (deck: string) => {
+        try {
+            await invoke("clear_loop", { deck });
+        } catch (e) {
+            console.error("Clear loop failed:", e);
+        }
+    },
+
+    setTempo: async (deck: string, bpm: number) => {
+        try {
+            await invoke("set_tempo", { deck, bpm });
+        } catch (e) {
+            console.error("Set tempo failed:", e);
         }
     },
 

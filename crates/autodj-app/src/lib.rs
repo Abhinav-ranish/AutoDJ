@@ -34,6 +34,10 @@ pub fn run() {
             commands::set_deck_gain,
             commands::set_eq,
             commands::set_filter,
+            commands::seek,
+            commands::set_loop,
+            commands::clear_loop,
+            commands::set_tempo,
             commands::get_engine_state,
         ])
         .run(tauri::generate_context!())

@@ -159,12 +159,13 @@ function DeckPanel({
     deckId: "A" | "B";
     className: string;
 }) {
-    const { engineState, play, pause, setDeckGain, setEq, setFilter } = useStore();
+    const { engineState, play, pause, setDeckGain, setEq, setFilter, setLoop, clearLoop } = useStore();
 
     const snapshot =
         deckId === "A" ? engineState?.deck_a : engineState?.deck_b;
     const isPlaying = snapshot?.state === "playing";
     const isEmpty = !snapshot || snapshot.state === "empty";
+    const loopActive = snapshot?.loop_active ?? false;
 
     return (
         <div className={`deck ${className}`}>
@@ -291,6 +292,20 @@ function DeckPanel({
                 >
                     {isPlaying ? "⏸" : "▶"}
                 </button>
+
+                {/* Loop controls */}
+                {[4, 8, 16].map((bars) => (
+                    <button
+                        key={bars}
+                        className={`transport-btn loop-btn ${loopActive ? "active-loop" : ""}`}
+                        onClick={() =>
+                            loopActive ? clearLoop(deckId) : setLoop(deckId, bars)
+                        }
+                        disabled={isEmpty}
+                    >
+                        {loopActive ? "✕" : `${bars}`}
+                    </button>
+                ))}
             </div>
         </div>
     );
