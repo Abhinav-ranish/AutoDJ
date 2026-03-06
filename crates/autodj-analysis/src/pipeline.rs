@@ -22,8 +22,8 @@ pub fn analyze_track(
     let now = chrono::Utc::now().to_rfc3339();
     let duration_ms = (samples.len() as u64 * 1000) / (sample_rate as u64 * channels as u64);
 
-    // In a real app we'd use `rayon` to run these in parallel, but they are fast enough
-    // for this milestone to just run sequentially.
+    // Note: To boost performance when scanning large libraries, these steps could
+    // be parallelized using `rayon`, but they run sequentially for now.
     let tempo = detect_bpm(samples, sample_rate);
     let beats = track_beats(samples, sample_rate, tempo.bpm);
     let key = detect_key(samples, sample_rate);

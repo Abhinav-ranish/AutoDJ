@@ -89,26 +89,39 @@ pub fn decode_to_pcm(
 fn find_ffmpeg() -> Result<PathBuf, DecoderError> {
     // Try common locations
     let candidates = [
-        "/opt/homebrew/bin/ffmpeg",
-        "/usr/local/bin/ffmpeg",
-        "/usr/bin/ffmpeg",
+        PathBuf::from("/opt/homebrew/bin/ffmpeg"),
+        PathBuf::from("/usr/local/bin/ffmpeg"),
+        PathBuf::from("/usr/bin/ffmpeg"),
     ];
 
     for path in &candidates {
-        let p = PathBuf::from(path);
-        if p.exists() {
-            return Ok(p);
+        if path.exists() {
+            return Ok(path.clone());
         }
     }
 
-    // Try PATH via `which`
-    let output = Command::new("which")
+    // Attempt Windows standard path
+    if cfg!(windows) {
+        if let Ok(program_files) = std::env::var("ProgramFiles") {
+            let win_path = PathBuf::from(program_files).join("ffmpeg").join("bin").join("ffmpeg.exe");
+            if win_path.exists() {
+                return Ok(win_path);
+            }
+        }
+    }
+
+    // Try PATH via `which` (Unix) or `where` (Windows)
+    let cmd = if cfg!(windows) { "where" } else { "which" };
+    let output = Command::new(cmd)
         .arg("ffmpeg")
         .output()
         .map_err(|_| DecoderError::FfmpegNotFound)?;
 
     if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let raw_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // `where` on Windows returns multiple lines if multiple executables exist; take the first one
+        let path = raw_path.lines().next().unwrap_or("").to_string();
+        
         if !path.is_empty() {
             return Ok(PathBuf::from(path));
         }

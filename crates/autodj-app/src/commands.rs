@@ -94,12 +94,16 @@ pub fn get_tracks(state: State<'_, AppState>) -> Result<Vec<TrackRecord>, String
 
 /// Load a track onto a deck.
 #[tauri::command]
-pub fn load_track(
+pub async fn load_track(
     deck: String,
     track_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let deck_id = parse_deck(&deck)?;
+    let deck_id = match deck.to_lowercase().as_str() {
+        "a" => DeckId::A,
+        "b" => DeckId::B,
+        _ => return Err(format!("Invalid deck: {deck}")),
+    };
 
     // Open the PCM cache file
     let pcm_path = state.cache.pcm_path(&track_id);
@@ -120,17 +124,15 @@ pub fn load_track(
 
 /// Play a deck.
 #[tauri::command]
-pub fn play(deck: String, state: State<'_, AppState>) -> Result<(), String> {
-    let deck_id = parse_deck(&deck)?;
-    state.send_command(Command::Play { deck: deck_id }, CommandSource::User);
+pub fn play(deck: DeckId, state: State<'_, AppState>) -> Result<(), String> {
+    state.send_command(Command::Play { deck }, CommandSource::User);
     Ok(())
 }
 
 /// Pause a deck.
 #[tauri::command]
-pub fn pause(deck: String, state: State<'_, AppState>) -> Result<(), String> {
-    let deck_id = parse_deck(&deck)?;
-    state.send_command(Command::Pause { deck: deck_id }, CommandSource::User);
+pub fn pause(deck: DeckId, state: State<'_, AppState>) -> Result<(), String> {
+    state.send_command(Command::Pause { deck }, CommandSource::User);
     Ok(())
 }
 
@@ -146,10 +148,9 @@ pub fn set_crossfader(position: f32, state: State<'_, AppState>) -> Result<(), S
 
 /// Set deck gain.
 #[tauri::command]
-pub fn set_deck_gain(deck: String, gain_db: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let deck_id = parse_deck(&deck)?;
+pub fn set_deck_gain(deck: DeckId, gain_db: f32, state: State<'_, AppState>) -> Result<(), String> {
     state.send_command(
-        Command::SetDeckGain { deck: deck_id, gain_db },
+        Command::SetDeckGain { deck, gain_db },
         CommandSource::User,
     );
     Ok(())
@@ -157,16 +158,9 @@ pub fn set_deck_gain(deck: String, gain_db: f32, state: State<'_, AppState>) -> 
 
 /// Set EQ band gain for a deck.
 #[tauri::command]
-pub fn set_eq(deck: String, band: String, gain_db: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let deck_id = parse_deck(&deck)?;
-    let eq_band = match band.to_lowercase().as_str() {
-        "low" => EqBand::Low,
-        "mid" => EqBand::Mid,
-        "high" => EqBand::High,
-        _ => return Err(format!("Invalid EQ band: {band}")),
-    };
+pub fn set_eq(deck: DeckId, band: EqBand, gain_db: f32, state: State<'_, AppState>) -> Result<(), String> {
     state.send_command(
-        Command::SetEq { deck: deck_id, band: eq_band, gain_db },
+        Command::SetEq { deck, band, gain_db },
         CommandSource::User,
     );
     Ok(())
@@ -174,10 +168,9 @@ pub fn set_eq(deck: String, band: String, gain_db: f32, state: State<'_, AppStat
 
 /// Set filter parameters for a deck.
 #[tauri::command]
-pub fn set_filter(deck: String, cutoff_hz: f32, resonance: f32, state: State<'_, AppState>) -> Result<(), String> {
-    let deck_id = parse_deck(&deck)?;
+pub fn set_filter(deck: DeckId, cutoff_hz: f32, resonance: f32, state: State<'_, AppState>) -> Result<(), String> {
     state.send_command(
-        Command::SetFilter { deck: deck_id, cutoff_hz, resonance },
+        Command::SetFilter { deck, cutoff_hz, resonance },
         CommandSource::User,
     );
     Ok(())
@@ -185,14 +178,15 @@ pub fn set_filter(deck: String, cutoff_hz: f32, resonance: f32, state: State<'_,
 
 /// Seek a deck to a position in milliseconds.
 #[tauri::command]
-pub fn seek(deck: String, position_ms: u64, state: State<'_, AppState>) -> Result<(), String> {
-    let deck_id = parse_deck(&deck)?;
-    // Convert ms to beats approximately (will be refined with track analysis)
-    // For now: beat = ms * bpm / 60000
-    let bpm = 128.0; // default; ideally get from engine state
+pub fn seek(deck: DeckId, position_ms: u64, state: State<'_, AppState>) -> Result<(), String> {
+    // Convert ms to beats based on actual deck BPM if available, else fallback to master
+    let bpm = state.latest_state()
+        .map(|s| s.master_bpm)
+        .unwrap_or(128.0);
+        
     let beat = (position_ms as f64 * bpm / 60000.0) as u64;
     state.send_command(
-        Command::Seek { deck: deck_id, beat },
+        Command::Seek { deck, beat },
         CommandSource::User,
     );
     Ok(())
@@ -200,12 +194,18 @@ pub fn seek(deck: String, position_ms: u64, state: State<'_, AppState>) -> Resul
 
 /// Set a loop on a deck.
 #[tauri::command]
-pub fn set_loop(deck: String, length_bars: u32, state: State<'_, AppState>) -> Result<(), String> {
-    let deck_id = parse_deck(&deck)?;
-    // Start beat = current position (approximate); the engine will handle it
-    // For now, use beat 0 — the UI will refine this
+pub fn set_loop(deck: DeckId, length_bars: u32, state: State<'_, AppState>) -> Result<(), String> {
+    // Calculate current beat from engine position using master BPM for now
+    let start_beat = state.latest_state()
+        .map(|s| {
+            let info = if deck == DeckId::A { &s.deck_a } else { &s.deck_b };
+            let bpm = s.master_bpm;
+            (info.position_ms as f64 * bpm / 60000.0) as u64
+        })
+        .unwrap_or(0);
+
     state.send_command(
-        Command::SetLoop { deck: deck_id, start_beat: 0, length_bars },
+        Command::SetLoop { deck, start_beat, length_bars },
         CommandSource::User,
     );
     Ok(())
@@ -213,10 +213,9 @@ pub fn set_loop(deck: String, length_bars: u32, state: State<'_, AppState>) -> R
 
 /// Clear the loop on a deck.
 #[tauri::command]
-pub fn clear_loop(deck: String, state: State<'_, AppState>) -> Result<(), String> {
-    let deck_id = parse_deck(&deck)?;
+pub fn clear_loop(deck: DeckId, state: State<'_, AppState>) -> Result<(), String> {
     state.send_command(
-        Command::ClearLoop { deck: deck_id },
+        Command::ClearLoop { deck },
         CommandSource::User,
     );
     Ok(())
@@ -224,10 +223,9 @@ pub fn clear_loop(deck: String, state: State<'_, AppState>) -> Result<(), String
 
 /// Set the tempo (BPM) for a deck.
 #[tauri::command]
-pub fn set_tempo(deck: String, bpm: f64, state: State<'_, AppState>) -> Result<(), String> {
-    let _deck_id = parse_deck(&deck)?;
+pub fn set_tempo(deck: DeckId, bpm: f64, state: State<'_, AppState>) -> Result<(), String> {
     state.send_command(
-        Command::SetTempo { deck: _deck_id, bpm },
+        Command::SetTempo { deck, bpm },
         CommandSource::User,
     );
     Ok(())
@@ -407,10 +405,4 @@ pub async fn request_next_track(state: State<'_, AppState>) -> Result<AiDecision
     Ok(decision)
 }
 
-fn parse_deck(deck: &str) -> Result<DeckId, String> {
-    match deck {
-        "A" | "a" => Ok(DeckId::A),
-        "B" | "b" => Ok(DeckId::B),
-        _ => Err(format!("Invalid deck: {deck}")),
-    }
-}
+

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Identifies which deck a command targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DeckId {
     A,
     B,

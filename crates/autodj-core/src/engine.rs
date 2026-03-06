@@ -380,9 +380,10 @@ impl AudioEngine {
                 Self::get_deck_mut(*deck, deck_a, deck_b).set_filter(*cutoff_hz, *resonance);
             }
             Command::SyncToMaster { deck } => {
-                // Sync deck speed to master BPM (simple BPM match for now)
-                let _ = deck; // Will need analysis BPM per track in Milestone D
-                log::debug!("SyncToMaster: BPM matching deferred until track analysis");
+                // Deck track_bpm and set_speed are not available on the primitive Deck struct
+                // BPM matching is handled by the higher-level AppState transitioning logic
+                let _ = deck;
+                log::debug!("SyncToMaster: Handled by AppState using TrackProfile");
             }
             Command::SetLoop { deck, start_beat, length_bars } => {
                 let start_frame = transport.beat_to_frame(*start_beat);

@@ -346,9 +346,9 @@ function sliderToFilter(val: number): number {
 function DJView() {
     const { engineState, setCrossfader, pollEngineState } = useStore();
 
-    // Poll engine state at ~30fps
+    // Poll engine state at ~10fps (100ms) to reduce IPC overhead
     useEffect(() => {
-        const interval = setInterval(pollEngineState, 33);
+        const interval = setInterval(pollEngineState, 100);
         return () => clearInterval(interval);
     }, [pollEngineState]);
 
@@ -460,14 +460,7 @@ function TransitionsPanel() {
         const deckA_playing = engineState?.deck_a?.state === "playing";
         const incomingDeck = deckA_playing ? "B" : "A";
 
-        executeTransition(template, {
-            duration_bars: duration,
-            incoming_deck: incomingDeck,
-            filter_start_hz: 200,
-            filter_end_hz: 8000,
-            silence_beats: 4,
-            bass_swap_bar: Math.max(1, Math.floor(duration / 2))
-        });
+        executeTransition(incomingDeck, template, duration);
     };
 
     return (

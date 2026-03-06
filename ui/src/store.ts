@@ -60,6 +60,7 @@ interface DJStore {
     mode: DjMode;
     aiDecision: AiDecision | null;
     isThinking: boolean;
+    errorToast: string | null;
 
     // Actions
     fetchTracks: () => Promise<void>;
@@ -79,12 +80,14 @@ interface DJStore {
     setActiveView: (view: "dj" | "library") => void;
     analyzeTrack: (trackId: string) => Promise<void>;
     getTrackProfile: (trackId: string) => Promise<any>;
-    executeTransition: (template: string, params: any) => Promise<void>;
+    executeTransition: (deck: string, template: string, durationBars: number) => Promise<void>;
 
     // AI Actions
     setMode: (mode: DjMode) => Promise<void>;
     requestNextTrack: () => Promise<void>;
     setAiConfig: (config: any) => Promise<void>;
+
+    setErrorToast: (msg: string | null) => void;
 }
 
 export const useStore = create<DJStore>((set, get) => ({
@@ -95,13 +98,20 @@ export const useStore = create<DJStore>((set, get) => ({
     mode: "manual",
     aiDecision: null,
     isThinking: false,
+    errorToast: null,
+
+    setErrorToast: (msg: string | null) => {
+        set({ errorToast: msg });
+        if (msg) setTimeout(() => set({ errorToast: null }), 3000);
+    },
 
     fetchTracks: async () => {
         try {
             const tracks = await invoke<TrackRecord[]>("get_tracks");
             set({ tracks });
-        } catch (e) {
-            console.error("Failed to fetch tracks:", e);
+        } catch (e: any) {
+            get().setErrorToast(`Failed to fetch tracks: ${e}`);
+            console.error(e);
         }
     },
 
@@ -223,7 +233,8 @@ export const useStore = create<DJStore>((set, get) => ({
             await invoke("analyze_track", { trackId });
             // Re-fetch tracks to update status immediately
             await get().fetchTracks();
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Analyze failed: ${e}`);
             console.error("Analyze failed:", e);
         }
     },
@@ -232,16 +243,18 @@ export const useStore = create<DJStore>((set, get) => ({
         try {
             const json = await invoke<string | null>("get_track_profile", { trackId });
             if (json) return JSON.parse(json);
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Get profile failed: ${e}`);
             console.error("Get profile failed:", e);
         }
         return null;
     },
 
-    executeTransition: async (template: string, params: any) => {
+    executeTransition: async (deck: string, template: string, durationBars: number) => {
         try {
-            await invoke("execute_transition", { template, params });
-        } catch (e) {
+            await invoke("execute_transition", { deck, template, durationBars });
+        } catch (e: any) {
+            get().setErrorToast(`Transition failed: ${e}`);
             console.error("Transition failed:", e);
         }
     },
@@ -264,12 +277,17 @@ export const useStore = create<DJStore>((set, get) => ({
             // AutoDJ Mode: Auto-execute transition if decision is ready
             if (get().mode === "autodj" && decision.decision === "transition_now" && decision.transition_plan) {
                 const plan = decision.transition_plan;
-                await get().executeTransition(plan.template_name, plan.parameter_overrides || {
-                    duration_bars: 16,
-                    incoming_deck: "B",
-                    silence_beats: 4,
-                    bass_swap_bar: 8
-                });
+                const overrides = plan.parameter_overrides || {};
+                const durationBars = overrides.duration_bars || 16;
+                const incomingDeck = overrides.incoming_deck ? overrides.incoming_deck.toLowerCase() : "b";
+
+                // For auto-transition, we target the deck that is currently playing to execute the outgoing transition.
+                // Assuming we get the currently active deck (naive approach here, since we don't know for sure).
+                // Usually the transition is executed ON the playing deck TO the incoming deck.
+                // For now use the 'incomingDeck' inverse, or just pass 'a' if incoming is 'b'.
+                const targetDeck = incomingDeck === "a" ? "B" : "A";
+
+                await get().executeTransition(targetDeck, plan.template_name, durationBars);
             }
         } catch (e) {
             console.error("AI Planning failed:", e);

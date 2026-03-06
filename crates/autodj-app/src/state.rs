@@ -98,7 +98,9 @@ impl AppState {
 }
 
 /// Get the data directory (~/.autodj).
+/// Get the data directory (~/.autodj or %APPDATA%\autodj).
 fn dirs_data_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".autodj")
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".autodj")
 }
