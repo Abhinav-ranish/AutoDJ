@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useStore } from "./store";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -374,6 +374,147 @@ function DJView() {
                     onChange={(e) => setCrossfader(Number(e.target.value) / 100)}
                 />
             </div>
+
+            <div style={{ display: "flex", gap: "20px" }}>
+                <TransitionsPanel />
+                <AiPanel />
+            </div>
+        </div>
+    );
+}
+
+// ─── AI Conductor Panel ──────────────────────────────────────────
+
+function AiPanel() {
+    const { mode, setMode, requestNextTrack, aiDecision, isThinking, tracks, loadTrack } = useStore();
+
+    const suggestedTrack = aiDecision?.track_selection
+        ? tracks.find(t => t.id === aiDecision.track_selection)
+        : null;
+
+    return (
+        <div className="ai-panel" style={{ marginTop: "20px", padding: "15px", background: "rgba(255,255,255,0.05)", borderRadius: "8px", flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                <h3 style={{ margin: 0, fontSize: "14px", textTransform: "uppercase", letterSpacing: "1px", color: "#aaa" }}>
+                    🤖 AI Conductor
+                </h3>
+                <div style={{ display: "flex", gap: "5px" }}>
+                    <button
+                        onClick={() => setMode("manual")}
+                        style={{ padding: "4px 8px", background: mode === "manual" ? "#444" : "#222", color: mode === "manual" ? "#fff" : "#888", border: "1px solid #333", borderRadius: "4px", fontSize: "10px" }}
+                    >MANUAL</button>
+                    <button
+                        onClick={() => setMode("assisted")}
+                        style={{ padding: "4px 8px", background: mode === "assisted" ? "#444" : "#222", color: mode === "assisted" ? "#fff" : "#888", border: "1px solid #333", borderRadius: "4px", fontSize: "10px" }}
+                    >ASSISTED</button>
+                    <button
+                        onClick={() => setMode("autodj")}
+                        style={{ padding: "4px 8px", background: mode === "autodj" ? "#4CAF50" : "#222", color: mode === "autodj" ? "#fff" : "#888", border: "1px solid #333", borderRadius: "4px", fontSize: "10px" }}
+                    >AUTO-DJ</button>
+                </div>
+            </div>
+
+            <button
+                onClick={requestNextTrack} disabled={isThinking}
+                style={{ width: "100%", padding: "10px", background: "#333", color: "#eee", border: "none", borderRadius: "4px", cursor: isThinking ? "wait" : "pointer" }}
+            >
+                {isThinking ? "🤔 Analyzing Crowd & Mix..." : "Suggest Next Track"}
+            </button>
+
+            {aiDecision && (
+                <div style={{ marginTop: "15px", padding: "10px", background: "#111", borderRadius: "4px", fontSize: "12px", color: "#ccc" }}>
+                    <div style={{ fontWeight: "bold", color: "#4CAF50", marginBottom: "5px" }}>
+                        Action: {aiDecision.decision}
+                    </div>
+                    <div style={{ marginBottom: "10px" }}>{aiDecision.reason}</div>
+
+                    {suggestedTrack && (
+                        <div style={{ marginTop: "10px", borderTop: "1px solid #333", paddingTop: "10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div>
+                                <div style={{ fontWeight: "bold", color: "#fff" }}>{suggestedTrack.title || "Unknown"}</div>
+                                <div style={{ color: "#888", fontSize: "10px" }}>{suggestedTrack.artist || "Unknown"} • {suggestedTrack.bpm?.toFixed(1)} BPM • {suggestedTrack.key}</div>
+                            </div>
+                            <button
+                                onClick={() => loadTrack("B", suggestedTrack.id)} // Target B for now
+                                style={{ padding: "5px 10px", background: "#2196F3", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer" }}
+                            >
+                                LOAD DECK B
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─── Transitions Panel ───────────────────────────────────────────
+
+function TransitionsPanel() {
+    const { executeTransition, engineState } = useStore();
+    const [template, setTemplate] = useState("smooth_beatmix");
+    const [duration, setDuration] = useState(16);
+
+    const handleGo = () => {
+        // Auto-detect direction: If deck A is playing and B is stopped/paused, target B as incoming.
+        const deckA_playing = engineState?.deck_a?.state === "playing";
+        const incomingDeck = deckA_playing ? "B" : "A";
+
+        executeTransition(template, {
+            duration_bars: duration,
+            incoming_deck: incomingDeck,
+            filter_start_hz: 200,
+            filter_end_hz: 8000,
+            silence_beats: 4,
+            bass_swap_bar: Math.max(1, Math.floor(duration / 2))
+        });
+    };
+
+    return (
+        <div className="transitions-panel" style={{ marginTop: "20px", padding: "15px", background: "rgba(255,255,255,0.05)", borderRadius: "8px", flex: 1 }}>
+            <h3 style={{ margin: "0 0 10px 0", fontSize: "14px", textTransform: "uppercase", letterSpacing: "1px", color: "#aaa" }}>
+                Auto Transition
+            </h3>
+            <div style={{ display: "flex", gap: "15px", alignItems: "flex-end" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                    <label style={{ fontSize: "12px", color: "#888" }}>STYLE</label>
+                    <select
+                        value={template}
+                        onChange={e => setTemplate(e.target.value)}
+                        style={{ padding: "8px", background: "#111", color: "#eee", border: "1px solid #333", borderRadius: "4px" }}
+                    >
+                        <option value="smooth_beatmix">Smooth Beatmix</option>
+                        <option value="filter_sweep">Filter Sweep</option>
+                        <option value="echo_drop">Echo Drop</option>
+                    </select>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "5px", flex: 1 }}>
+                    <label style={{ fontSize: "12px", color: "#888" }}>DURATION ({duration} BTT)</label>
+                    <input
+                        type="range"
+                        min={4} max={64} step={4}
+                        value={duration}
+                        onChange={e => setDuration(Number(e.target.value))}
+                        style={{ width: "100%" }}
+                    />
+                </div>
+
+                <button
+                    onClick={handleGo}
+                    style={{
+                        padding: "10px 20px",
+                        background: "#4CAF50",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontWeight: "bold"
+                    }}
+                >
+                    GO ✨
+                </button>
+            </div>
         </div>
     );
 }
@@ -381,12 +522,17 @@ function DJView() {
 // ─── App ─────────────────────────────────────────────────────────
 
 export default function App() {
-    const { activeView, setActiveView, engineState } = useStore();
+    const { activeView, setActiveView, engineState, mode } = useStore();
 
     return (
         <div className="app">
             <header className="header">
-                <div className="logo">AutoDJ</div>
+                <div className="logo" style={{ display: "flex", gap: "10px", alignItems: "baseline" }}>
+                    AutoDJ
+                    <span style={{ fontSize: "10px", padding: "2px 6px", background: "#333", borderRadius: "10px", textTransform: "uppercase" }}>
+                        {mode} MODE
+                    </span>
+                </div>
                 <nav className="nav-tabs">
                     <button
                         className={`nav-tab ${activeView === "library" ? "active" : ""}`}

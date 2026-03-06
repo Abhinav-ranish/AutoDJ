@@ -5,16 +5,28 @@ use autodj_core::command::{Command, CommandSource, DeckId};
 use autodj_core::engine::{AudioEngine, EngineStateSnapshot, TrackLoader};
 use autodj_storage::cache::CacheManager;
 use autodj_storage::db::Database;
+use autodj_ai::{AiConfig, planner::AiPlanner};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DjMode {
+    Manual,
+    Assisted,
+    Autodj,
+}
+
 /// Shared application state managed by Tauri.
 pub struct AppState {
-    pub db: Mutex<Database>,
-    pub cache: CacheManager,
+    pub db: Arc<Mutex<Database>>,
+    pub cache: Arc<CacheManager>,
     pub engine_sender: Mutex<autodj_core::engine::EngineCommandSender>,
     pub engine_receiver: Mutex<autodj_core::engine::EngineStateReceiver>,
     pub track_loader: Mutex<TrackLoader>,
+    pub ai_planner: tokio::sync::RwLock<AiPlanner>,
+    pub dj_mode: std::sync::RwLock<DjMode>,
     pub data_dir: PathBuf,
     pub sample_rate: u32,
 }
@@ -44,11 +56,13 @@ impl AppState {
         let sample_rate = engine.sample_rate;
 
         Ok(Self {
-            db: Mutex::new(db),
-            cache,
+            db: Arc::new(Mutex::new(db)),
+            cache: Arc::new(cache),
             engine_sender: Mutex::new(engine.command_sender),
             engine_receiver: Mutex::new(engine.state_receiver),
             track_loader: Mutex::new(loader),
+            ai_planner: tokio::sync::RwLock::new(AiPlanner::new(AiConfig::default())),
+            dj_mode: std::sync::RwLock::new(DjMode::Manual),
             data_dir,
             sample_rate,
         })

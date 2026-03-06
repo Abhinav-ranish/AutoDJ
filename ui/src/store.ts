@@ -40,11 +40,26 @@ export interface EngineState {
     sample_pos: number;
 }
 
+export interface AiDecision {
+    decision: string;
+    reason: string;
+    track_selection?: string;
+    transition_plan?: {
+        template_name: string;
+        parameter_overrides?: any;
+    };
+}
+
+export type DjMode = "manual" | "assisted" | "autodj";
+
 interface DJStore {
     tracks: TrackRecord[];
     engineState: EngineState | null;
     importing: boolean;
     activeView: "dj" | "library";
+    mode: DjMode;
+    aiDecision: AiDecision | null;
+    isThinking: boolean;
 
     // Actions
     fetchTracks: () => Promise<void>;
@@ -64,6 +79,12 @@ interface DJStore {
     setActiveView: (view: "dj" | "library") => void;
     analyzeTrack: (trackId: string) => Promise<void>;
     getTrackProfile: (trackId: string) => Promise<any>;
+    executeTransition: (template: string, params: any) => Promise<void>;
+
+    // AI Actions
+    setMode: (mode: DjMode) => Promise<void>;
+    requestNextTrack: () => Promise<void>;
+    setAiConfig: (config: any) => Promise<void>;
 }
 
 export const useStore = create<DJStore>((set, get) => ({
@@ -71,6 +92,9 @@ export const useStore = create<DJStore>((set, get) => ({
     engineState: null,
     importing: false,
     activeView: "library",
+    mode: "manual",
+    aiDecision: null,
+    isThinking: false,
 
     fetchTracks: async () => {
         try {
@@ -212,5 +236,52 @@ export const useStore = create<DJStore>((set, get) => ({
             console.error("Get profile failed:", e);
         }
         return null;
+    },
+
+    executeTransition: async (template: string, params: any) => {
+        try {
+            await invoke("execute_transition", { template, params });
+        } catch (e) {
+            console.error("Transition failed:", e);
+        }
+    },
+
+    setMode: async (mode: DjMode) => {
+        try {
+            await invoke("set_mode", { mode });
+            set({ mode });
+        } catch (e) {
+            console.error("Set mode failed:", e);
+        }
+    },
+
+    requestNextTrack: async () => {
+        set({ isThinking: true, aiDecision: null });
+        try {
+            const decision = await invoke<AiDecision>("request_next_track");
+            set({ aiDecision: decision });
+
+            // AutoDJ Mode: Auto-execute transition if decision is ready
+            if (get().mode === "autodj" && decision.decision === "transition_now" && decision.transition_plan) {
+                const plan = decision.transition_plan;
+                await get().executeTransition(plan.template_name, plan.parameter_overrides || {
+                    duration_bars: 16,
+                    incoming_deck: "B",
+                    silence_beats: 4,
+                    bass_swap_bar: 8
+                });
+            }
+        } catch (e) {
+            console.error("AI Planning failed:", e);
+        }
+        set({ isThinking: false });
+    },
+
+    setAiConfig: async (config: any) => {
+        try {
+            await invoke("set_ai_config", { config });
+        } catch (e) {
+            console.error("Set AI config failed:", e);
+        }
     },
 }));

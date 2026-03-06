@@ -38,26 +38,26 @@
 - [x] Tests: BPM on synthetic audio, key detection, pipeline integration
 
 ## Phase 6: Milestone E — Transitions
-- [ ] `TransitionTemplate` trait + `TransitionExpander` registry — `transition.rs`
-- [ ] `SmoothBeatmix` template (16-bar bass swap)
-- [ ] `FilterSweep` template (HP sweep + fade)
-- [ ] `EchoDrop` template (echo → silence → drop)
-- [ ] `ExecuteTransition` command variant + validation
-- [ ] Engine: expand transitions into scheduled commands
-- [ ] Tauri: `execute_transition` command
-- [ ] UI: transition control panel (template dropdown, duration slider)
+- [x] `TransitionTemplate` trait + `TransitionExpander` registry — `transition.rs`
+- [x] `SmoothBeatmix` template (16-bar bass swap)
+- [x] `FilterSweep` template (HP sweep + fade)
+- [x] `EchoDrop` template (echo → silence → drop)
+- [x] `ExecuteTransition` command variant + validation
+- [x] Engine: expand transitions into scheduled commands
+- [x] Tauri: `execute_transition` command
+- [x] UI: transition control panel (template dropdown, duration slider)
 - [ ] Tests: expand functions, full engine integration
 
 ## Phase 7: Milestone F — AI Conductor
-- [ ] Heuristic scorer with configurable weights — `scorer.rs`
-- [ ] Camelot wheel distance function — `camelot.rs`
-- [ ] AI context builder — `context.rs`
-- [ ] AI planner (LLM first, heuristic fallback) — `planner.rs`
-- [ ] LLM client (reqwest, rate limiting, timeout) — `llm.rs`
-- [ ] AI decision JSON schema validation
-- [ ] Tauri: `request_next_track`, `set_mode`, `set_ai_config` commands
-- [ ] AppState: add AiPlanner + DjMode tracking
-- [ ] UI: mode switcher, AI status, suggestion panel, config panel
-- [ ] Tests: scorer ranking, camelot distance, mock LLM, fallback path
+- [x] Heuristic scorer with configurable weights — `scorer.rs`
+- [x] Camelot wheel distance function — `camelot.rs`
+- [x] AI context builder — `context.rs`
+- [x] AI planner (LLM first, heuristic fallback) — `planner.rs`
+- [x] LLM client (reqwest, rate limiting, timeout) — `llm.rs`
+- [x] AI decision JSON schema validation
+- [x] Tauri: `request_next_track`, `set_mode`, `set_ai_config` commands
+- [x] AppState: add AiPlanner + DjMode tracking
+- [x] UI: mode switcher, AI status, suggestion panel, config panel
+- [x] Tests: scorer ranking, camelot distance, mock LLM, fallback path
 
 ## Phase 8: Milestone G — Polish + Export

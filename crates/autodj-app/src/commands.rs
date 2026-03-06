@@ -5,6 +5,8 @@ use autodj_core::engine::EngineStateSnapshot;
 use autodj_storage::cache::hash_file;
 use autodj_storage::db::TrackRecord;
 use autodj_storage::decoder;
+use autodj_ai::{AiConfig, planner::AiDecision, context::build_context};
+use crate::state::DjMode;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
@@ -239,21 +241,21 @@ pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(),
 
     // Spawn a background thread to do the analysis
     std::thread::spawn(move || {
-        let track = match db.get_track(&track_id) {
+        let track = match db.lock().unwrap().get_track(&track_id) {
             Ok(Some(t)) => t,
             _ => return,
         };
 
         if track.import_status != "ready" && track.import_status != "analyzed" {
-            let _ = db.update_status(&track_id, "analysis_failed", Some("Track not ready"));
+            let _ = db.lock().unwrap().update_status(&track_id, "analysis_failed", Some("Track not ready"));
             return;
         }
 
-        let pcm_path = cache.cache_dir().join(format!("{}.adjp", track.file_hash));
+        let pcm_path = cache.base_dir().join(format!("{}.adjp", track.file_hash));
         let buffer = match autodj_core::buffer::TrackBuffer::open(&pcm_path) {
             Ok(b) => b,
             Err(_) => {
-                let _ = db.update_status(&track_id, "analysis_failed", Some("Failed to open PCM buffer"));
+                let _ = db.lock().unwrap().update_status(&track_id, "analysis_failed", Some("Failed to open PCM buffer"));
                 return;
             }
         };
@@ -265,7 +267,7 @@ pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(),
             samples.push(buffer.get_sample(i));
         }
 
-        let peaks_dir = cache.cache_dir();
+        let peaks_dir = cache.base_dir();
 
         match autodj_analysis::analyze_track(
             track_id.clone(),
@@ -277,7 +279,8 @@ pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(),
         ) {
             Ok(profile) => {
                 let json = serde_json::to_string(&profile).unwrap_or_default();
-                let _ = db.save_track_profile(
+                let db_guard = db.lock().unwrap();
+                let _ = db_guard.save_track_profile(
                     &track_id,
                     &json,
                     profile.tempo.bpm,
@@ -288,10 +291,10 @@ pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(),
                     profile.loudness.integrated_lufs,
                     profile.energy.average,
                 );
-                let _ = db.update_status(&track_id, "analyzed", None);
+                let _ = db_guard.update_status(&track_id, "analyzed", None);
             }
             Err(e) => {
-                let _ = db.update_status(&track_id, "analysis_failed", Some(&e));
+                let _ = db.lock().unwrap().update_status(&track_id, "analysis_failed", Some(&e.to_string()));
             }
         }
     });
@@ -299,16 +302,109 @@ pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(),
     Ok(())
 }
 
+/// Execute a transition template.
+#[tauri::command]
+pub fn execute_transition(
+    template: String,
+    params: serde_json::Value,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.send_command(
+        Command::ExecuteTransition { template, params },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
 /// Get a track profile.
 #[tauri::command]
 pub fn get_track_profile(track_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
-    state.db.get_track_profile_json(&track_id).map_err(|e| e.to_string())
+    state.db.lock().map_err(|e| format!("DB lock error: {e}"))?.get_track_profile_json(&track_id).map_err(|e| e.to_string())
 }
 
 /// Get the current engine state snapshot.
 #[tauri::command]
 pub fn get_engine_state(state: State<'_, AppState>) -> Result<Option<EngineStateSnapshot>, String> {
     Ok(state.latest_state())
+}
+
+/// Set the DJ mode (manual, assisted, autodj).
+#[tauri::command]
+pub fn set_mode(mode: DjMode, state: State<'_, AppState>) -> Result<(), String> {
+    let mut current_mode = state.dj_mode.write().map_err(|_| "Failed to lock dj_mode")?;
+    *current_mode = mode;
+    Ok(())
+}
+
+/// Configure the AI conductor.
+#[tauri::command]
+pub async fn set_ai_config(config: AiConfig, state: State<'_, AppState>) -> Result<(), String> {
+    let mut planner = state.ai_planner.write().await;
+    planner.set_config(config);
+    Ok(())
+}
+
+/// Request the next track from the AI Planner.
+#[tauri::command]
+pub async fn request_next_track(state: State<'_, AppState>) -> Result<AiDecision, String> {
+    // 1. Get engine properties snapshot
+    let snapshot = state.latest_state().ok_or("Engine state unavailable")?;
+    
+    // 2. Fetch tracks and lock DB to assemble AiContext
+    let (playing_profile, avail_profiles, avail_metadata) = {
+        let db = state.db.lock().map_err(|e| format!("DB Lock error: {e}"))?;
+        let tracks = db.get_all_tracks().map_err(|e| format!("DB error: {e}"))?;
+        
+        let mut profiles = Vec::new();
+        let mut metadata = std::collections::HashMap::new();
+
+        let deck_a_playing = snapshot.deck_a.state == "playing";
+        let _playing_id = if deck_a_playing { "UNKNOWN_A" } else { "UNKNOWN_B" }; // TODO track currently loaded ID natively
+
+        let mut current_profile = None;
+
+        for track in tracks {
+            if let Ok(Some(json)) = db.get_track_profile_json(&track.id) {
+                if let Ok(profile) = serde_json::from_str::<autodj_analysis::profile::TrackProfile>(&json) {
+                    metadata.insert(track.id.clone(), (
+                        track.artist.clone().unwrap_or_else(|| "Unknown".to_string()),
+                        track.title.clone().unwrap_or_else(|| "Unknown".to_string())
+                    ));
+                    
+                    // Hack for demonstration: just pick the first track as playing if none specified
+                    if current_profile.is_none() {
+                        current_profile = Some(profile.clone());
+                    }
+
+                    profiles.push(profile);
+                }
+            }
+        }
+        
+        let p = current_profile.ok_or("No current track profile found!")?;
+        (p, profiles, metadata)
+    };
+    
+    // 3. Assemble Context
+    let context = build_context(
+        &snapshot,
+        &playing_profile,
+        "Artist",
+        "Title",
+        &avail_profiles,
+        "maintain", // Default intent
+        0.5,
+        &[],
+        &avail_metadata
+    );
+
+    // 4. Await LLM AI Plan
+    let planner = state.ai_planner.read().await;
+    let decision = planner.plan_next(&context, &playing_profile, &avail_profiles)
+        .await
+        .map_err(|e| format!("AI Planning Error: {e}"))?;
+    
+    Ok(decision)
 }
 
 fn parse_deck(deck: &str) -> Result<DeckId, String> {

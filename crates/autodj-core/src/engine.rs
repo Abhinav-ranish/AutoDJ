@@ -121,6 +121,27 @@ impl EngineCommandSender {
         source: CommandSource,
         schedule: SchedulePoint,
     ) -> bool {
+        if let Command::ExecuteTransition { template, params } = &command {
+            match crate::transition::TransitionExpander::expand(template, params) {
+                Ok(commands) => {
+                    let mut all_ok = true;
+                    for mut cmd in commands {
+                        cmd.source = source;
+                        // For MVP, we let the inner commands dictate their schedule 
+                        // (e.g., NextBar, AfterBeats relative to NextBar)
+                        if self.producer.try_push(cmd).is_err() {
+                            all_ok = false;
+                        }
+                    }
+                    return all_ok;
+                }
+                Err(e) => {
+                    log::error!("Failed to expand transition: {}", e);
+                    return false;
+                }
+            }
+        }
+
         let validated = match CommandValidator::validate(command) {
             Some(cmd) => cmd,
             None => return false,
