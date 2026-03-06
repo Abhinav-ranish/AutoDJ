@@ -281,6 +281,7 @@ export const useStore = create<DJStore>((set, get) => ({
         } catch (e: any) {
             get().setErrorToast(`Transition failed: ${e}`);
             console.error("Transition failed:", e);
+            throw e;
         }
     },
 

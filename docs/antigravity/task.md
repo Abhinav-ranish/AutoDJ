@@ -56,7 +56,7 @@ stry — `transition.rs`
 - [x] Engine: expand transitions into scheduled commands
 - [x] Tauri: `execute_transition` command
 - [x] UI: transition control panel (template dropdown, duration slider)
-- [ ] Tests: expand functions, full engine integration
+- [x] Tests: expand functions, full engine integration
 
 ## Phase 7:## Milestone F — AI Conductor
 - [x] Heuristic scorer & Camelot math
