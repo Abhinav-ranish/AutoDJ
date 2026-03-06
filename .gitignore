@@ -33,3 +33,5 @@ Thumbs.db
 # Project Specific
 .agents/
 /tmp/
+
+skills-lock.json
