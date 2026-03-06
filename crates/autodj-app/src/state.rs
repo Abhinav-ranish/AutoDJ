@@ -52,8 +52,10 @@ impl AppState {
         let (loader, load_receiver) = autodj_core::engine::create_track_loader();
 
         // Initialize audio engine with the track load receiver
-        let engine = AudioEngine::new(load_receiver)?;
+        let (engine, stream) = AudioEngine::new(load_receiver)?;
         let sample_rate = engine.sample_rate;
+
+        Box::leak(Box::new(stream));
 
         Ok(Self {
             db: Arc::new(Mutex::new(db)),

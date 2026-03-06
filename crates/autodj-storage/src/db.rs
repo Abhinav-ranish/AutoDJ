@@ -386,6 +386,19 @@ impl Database {
         }
         Ok(cues)
     }
+
+    /// Clear all tracks and related data from the database.
+    pub fn clear_all_tracks(&self) -> Result<(), DbError> {
+        self.conn.execute_batch(
+            "
+            DELETE FROM hot_cues;
+            DELETE FROM mix_history;
+            DELETE FROM track_profiles;
+            DELETE FROM tracks;
+            "
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

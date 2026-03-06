@@ -102,6 +102,17 @@ impl CacheManager {
     pub fn base_dir(&self) -> &Path {
         &self.base_dir
     }
+
+    /// Clear all files in the cache and originals directories.
+    pub fn clear_all(&self) -> Result<(), CacheError> {
+        let _ = fs::remove_dir_all(self.pcm_dir());
+        let _ = fs::remove_dir_all(self.peaks_dir());
+        let _ = fs::remove_dir_all(self.originals_dir());
+        fs::create_dir_all(self.pcm_dir())?;
+        fs::create_dir_all(self.peaks_dir())?;
+        fs::create_dir_all(self.originals_dir())?;
+        Ok(())
+    }
 }
 
 /// Compute a fast hash of a file (first 1 MB + last 1 MB + file size).

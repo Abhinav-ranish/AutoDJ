@@ -61,6 +61,7 @@ interface DJStore {
     aiDecision: AiDecision | null;
     isThinking: boolean;
     errorToast: string | null;
+    analyzingTracks: Set<string>;
 
     // Actions
     fetchTracks: () => Promise<void>;
@@ -81,6 +82,7 @@ interface DJStore {
     analyzeTrack: (trackId: string) => Promise<void>;
     getTrackProfile: (trackId: string) => Promise<any>;
     executeTransition: (deck: string, template: string, durationBars: number) => Promise<void>;
+    clearLibrary: () => Promise<void>;
 
     // AI Actions
     setMode: (mode: DjMode) => Promise<void>;
@@ -100,6 +102,7 @@ export const useStore = create<DJStore>((set, get) => ({
     aiDecision: null,
     isThinking: false,
     errorToast: null,
+    analyzingTracks: new Set(),
 
     setErrorToast: (msg: string | null) => {
         set({ errorToast: msg });
@@ -121,6 +124,15 @@ export const useStore = create<DJStore>((set, get) => ({
         try {
             await invoke("import_files", { paths });
             await get().fetchTracks();
+
+            // Automatically analyze newly imported tracks
+            const tracks = get().tracks;
+            for (const track of tracks) {
+                if (track.import_status === "ready") {
+                    // Fire and forget so we don't block the UI
+                    get().analyzeTrack(track.id).catch(console.error);
+                }
+            }
         } catch (e: any) {
             get().setErrorToast(`Import failed: ${e}`);
             console.error("Import failed:", e);
@@ -130,7 +142,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     loadTrack: async (deck: "a" | "b", trackId: string) => {
         try {
-            await invoke("load_track", { deck, trackId });
+            await invoke("load_track", { deck: deck.toLowerCase(), trackId });
             set({ activeView: "dj" });
         } catch (e: any) {
             get().setErrorToast(`Load failed: ${e}`);
@@ -140,7 +152,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     play: async (deck: string) => {
         try {
-            await invoke("play", { deck });
+            await invoke("play", { deck: deck.toLowerCase() });
         } catch (e: any) {
             get().setErrorToast(`Play failed: ${e}`);
             console.error("Play failed:", e);
@@ -149,7 +161,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     pause: async (deck: string) => {
         try {
-            await invoke("pause", { deck });
+            await invoke("pause", { deck: deck.toLowerCase() });
         } catch (e: any) {
             get().setErrorToast(`Pause failed: ${e}`);
             console.error("Pause failed:", e);
@@ -158,7 +170,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     seek: async (deck: string, positionMs: number) => {
         try {
-            await invoke("seek", { deck, positionMs });
+            await invoke("seek", { deck: deck.toLowerCase(), positionMs });
         } catch (e: any) {
             get().setErrorToast(`Seek failed: ${e}`);
             console.error("Seek failed:", e);
@@ -176,7 +188,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     setDeckGain: async (deck: string, gainDb: number) => {
         try {
-            await invoke("set_deck_gain", { deck, gainDb });
+            await invoke("set_deck_gain", { deck: deck.toLowerCase(), gainDb });
         } catch (e: any) {
             get().setErrorToast(`Gain failed: ${e}`);
             console.error("Gain failed:", e);
@@ -185,7 +197,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     setEq: async (deck: string, band: string, gainDb: number) => {
         try {
-            await invoke("set_eq", { deck, band, gainDb });
+            await invoke("set_eq", { deck: deck.toLowerCase(), band, gainDb });
         } catch (e: any) {
             get().setErrorToast(`EQ failed: ${e}`);
             console.error("EQ failed:", e);
@@ -194,7 +206,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     setFilter: async (deck: string, cutoffHz: number, resonance: number) => {
         try {
-            await invoke("set_filter", { deck, cutoffHz, resonance });
+            await invoke("set_filter", { deck: deck.toLowerCase(), cutoffHz, resonance });
         } catch (e: any) {
             get().setErrorToast(`Filter failed: ${e}`);
             console.error("Filter failed:", e);
@@ -203,7 +215,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     setLoop: async (deck: string, lengthBars: number) => {
         try {
-            await invoke("set_loop", { deck, lengthBars });
+            await invoke("set_loop", { deck: deck.toLowerCase(), lengthBars });
         } catch (e: any) {
             get().setErrorToast(`Loop failed: ${e}`);
             console.error("Loop failed:", e);
@@ -212,7 +224,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     clearLoop: async (deck: string) => {
         try {
-            await invoke("clear_loop", { deck });
+            await invoke("clear_loop", { deck: deck.toLowerCase() });
         } catch (e: any) {
             get().setErrorToast(`Clear loop failed: ${e}`);
             console.error("Clear loop failed:", e);
@@ -221,7 +233,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     setTempo: async (deck: string, bpm: number) => {
         try {
-            await invoke("set_tempo", { deck, bpm });
+            await invoke("set_tempo", { deck: deck.toLowerCase(), bpm });
         } catch (e: any) {
             get().setErrorToast(`Set tempo failed: ${e}`);
             console.error("Set tempo failed:", e);
@@ -235,6 +247,7 @@ export const useStore = create<DJStore>((set, get) => ({
     setActiveView: (view) => set({ activeView: view }),
 
     analyzeTrack: async (trackId: string) => {
+        set((state) => ({ analyzingTracks: new Set(state.analyzingTracks).add(trackId) }));
         try {
             await invoke("analyze_track", { trackId });
             // Re-fetch tracks to update status immediately
@@ -242,6 +255,12 @@ export const useStore = create<DJStore>((set, get) => ({
         } catch (e: any) {
             get().setErrorToast(`Analyze failed: ${e}`);
             console.error("Analyze failed:", e);
+        } finally {
+            set((state) => {
+                const next = new Set(state.analyzingTracks);
+                next.delete(trackId);
+                return { analyzingTracks: next };
+            });
         }
     },
 
@@ -258,10 +277,20 @@ export const useStore = create<DJStore>((set, get) => ({
 
     executeTransition: async (deck: string, template: string, durationBars: number) => {
         try {
-            await invoke("execute_transition", { deck, template, durationBars });
+            await invoke("execute_transition", { deck: deck.toLowerCase(), template, durationBars });
         } catch (e: any) {
             get().setErrorToast(`Transition failed: ${e}`);
             console.error("Transition failed:", e);
+        }
+    },
+
+    clearLibrary: async () => {
+        try {
+            await invoke("clear_library");
+            set({ tracks: [] });
+        } catch (e: any) {
+            get().setErrorToast(`Clear library failed: ${e}`);
+            console.error("Clear library failed:", e);
         }
     },
 

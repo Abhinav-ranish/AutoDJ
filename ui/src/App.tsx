@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState } from "react";
 import { useStore, EngineState } from "./store";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
+import logo from "./assets/logo.png";
 
 function formatTime(ms: number): string {
     const totalSeconds = Math.floor(ms / 1000);
@@ -13,7 +14,7 @@ function formatTime(ms: number): string {
 // ─── Library View ────────────────────────────────────────────────
 
 function LibraryView() {
-    const { tracks, importing, fetchTracks, importFiles, loadTrack } = useStore();
+    const { tracks, importing, fetchTracks, importFiles, loadTrack, clearLibrary, analyzingTracks } = useStore();
 
     useEffect(() => {
         fetchTracks();
@@ -35,16 +36,40 @@ function LibraryView() {
         }
     }, [importFiles]);
 
+    const handleClear = useCallback(async () => {
+        if (confirm("Are you sure you want to clear your entire library? This will delete all tracks from the database and clear the cache.")) {
+            await clearLibrary();
+        }
+    }, [clearLibrary]);
+
     return (
         <div className="library">
             <div className="library-toolbar">
-                <button
-                    className="import-btn"
-                    onClick={handleImport}
-                    disabled={importing}
-                >
-                    {importing ? "⟳ Importing..." : "＋ Import Files"}
-                </button>
+                <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                        className="import-btn"
+                        onClick={handleImport}
+                        disabled={importing}
+                        style={{ backgroundColor: "#4CAF50", color: "white", border: "none" }}
+                    >
+                        {importing ? "⟳ Importing..." : "＋ Import Files"}
+                    </button>
+                    <button
+                        onClick={handleClear}
+                        disabled={importing || tracks.length === 0}
+                        style={{
+                            padding: "8px 16px",
+                            backgroundColor: "#f44336",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: importing || tracks.length === 0 ? "not-allowed" : "pointer",
+                            opacity: importing || tracks.length === 0 ? 0.5 : 1
+                        }}
+                    >
+                        🗑 Clear Library
+                    </button>
+                </div>
                 <span className="track-count">{tracks.length} tracks</span>
             </div>
 
@@ -63,65 +88,65 @@ function LibraryView() {
                         <div>No tracks yet — import some audio files to get started</div>
                     </div>
                 ) : (
-                    tracks.map((track) => (
-                        <div className="track-row" key={track.id}>
-                            <span className="track-title">
-                                {track.title || "Unknown Title"}
-                            </span>
-                            <span className="track-artist">
-                                {track.artist || "Unknown Artist"}
-                            </span>
-                            <span className="track-duration">
-                                {track.bpm ? track.bpm.toFixed(1) : "—"}
-                            </span>
-                            <span className="track-duration">
-                                {track.key || "—"}
-                            </span>
-                            <span className="track-duration">
-                                {track.duration_ms ? formatTime(track.duration_ms) : "—"}
-                            </span>
-                            <span className="load-actions">
-                                <span
-                                    className={`status-badge status-${track.import_status}`}
-                                >
-                                    {track.import_status === "ready" ? "✓" : "⟳"}{" "}
-                                    {track.import_status}
+                    tracks.map((track) => {
+                        const isAnalyzing = analyzingTracks.has(track.id);
+                        return (
+                            <div className="track-row" key={track.id}>
+                                <span className="track-title">
+                                    {track.title || "Unknown Title"}
                                 </span>
-                                {(track.import_status === "ready" || track.import_status === "analyzed") && (
-                                    <>
-                                        <button
-                                            className="deck-load-btn"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                useStore.getState().analyzeTrack(track.id);
-                                            }}
-                                            title="Analyze Track"
-                                        >
-                                            ⚡
-                                        </button>
-                                        <button
-                                            className="deck-load-btn deck-a"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                loadTrack("a", track.id);
-                                            }}
-                                        >
-                                            A
-                                        </button>
-                                        <button
-                                            className="deck-load-btn deck-b"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                loadTrack("b", track.id);
-                                            }}
-                                        >
-                                            B
-                                        </button>
-                                    </>
-                                )}
-                            </span>
-                        </div>
-                    ))
+                                <span className="track-artist">
+                                    {track.artist || "Unknown Artist"}
+                                </span>
+                                <span className="track-duration">
+                                    {track.bpm ? track.bpm.toFixed(1) : "—"}
+                                </span>
+                                <span className="track-duration">
+                                    {track.key || "—"}
+                                </span>
+                                <span className="track-duration">
+                                    {track.duration_ms ? formatTime(track.duration_ms) : "—"}
+                                </span>
+                                <span className="load-actions">
+                                    <span
+                                        className={`status-badge status-${track.import_status}`}
+                                    >
+                                        {track.import_status === "analyzed" ? "✓ Analyzed"
+                                            : track.import_status === "error" || track.import_status === "analysis_failed" ? "✕ Error"
+                                                : track.import_status === "ready" ? "✓ Uploaded"
+                                                    : "⟳ Loading..."}
+                                    </span>
+                                    {isAnalyzing && (
+                                        <span className="status-badge" style={{ marginLeft: "4px", color: "#00d4ff", background: "#00d4ff20" }}>
+                                            ⟳ Analyzing...
+                                        </span>
+                                    )}
+                                    {(track.import_status === "ready" || track.import_status === "analyzed") && (
+                                        <>
+                                            <button
+                                                className="deck-load-btn deck-a"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    loadTrack("a", track.id);
+                                                }}
+                                            >
+                                                A
+                                            </button>
+                                            <button
+                                                className="deck-load-btn deck-b"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    loadTrack("b", track.id);
+                                                }}
+                                            >
+                                                B
+                                            </button>
+                                        </>
+                                    )}
+                                </span>
+                            </div>
+                        );
+                    })
                 )}
             </div>
         </div>
@@ -510,7 +535,7 @@ function TransitionsPanel() {
 // ─── App ─────────────────────────────────────────────────────────
 
 export default function App() {
-    const { activeView, setActiveView, engineState, mode, setEngineState } = useStore();
+    const { activeView, setActiveView, setEngineState } = useStore();
 
     useEffect(() => {
         const unlisten = listen<EngineState>("engine-state", (event) => {
@@ -524,11 +549,9 @@ export default function App() {
     return (
         <div className="app">
             <header className="header">
-                <div className="logo" style={{ display: "flex", gap: "10px", alignItems: "baseline" }}>
+                <div className="logo">
+                    <img src={logo} alt="AutoDJ Logo" style={{ height: "28px" }} />
                     AutoDJ
-                    <span style={{ fontSize: "10px", padding: "2px 6px", background: "#333", borderRadius: "10px", textTransform: "uppercase" }}>
-                        {mode} MODE
-                    </span>
                 </div>
                 <nav className="nav-tabs">
                     <button
@@ -544,11 +567,6 @@ export default function App() {
                         DJ
                     </button>
                 </nav>
-                <div className="header-info">
-                    <span className="bpm-display">
-                        {engineState?.master_bpm?.toFixed(1) ?? "—"} BPM
-                    </span>
-                </div>
             </header>
 
             <main className="main-content">

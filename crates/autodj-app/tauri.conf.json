@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "identifier": "com.autodj.app",
   "build": {
-    "beforeDevCommand": "cd $(git rev-parse --show-toplevel)/ui && npm run dev",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "cd $(git rev-parse --show-toplevel)/ui && npm run build",
-    "frontendDist": "../../ui/dist"
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "./dist"
   },
   "app": {
     "windows": [
@@ -31,7 +31,9 @@
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/128x128@2x.png"
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
     ]
   }
 }

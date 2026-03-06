@@ -22,12 +22,6 @@ pub fn run() {
         }
     };
 
-    let engine_receiver = app_state.engine_receiver.lock().unwrap();
-    // We need to move the receiver out or clone the Arc if it was an Arc... 
-    // Wait, AppState.engine_receiver is Mutex<EngineStateReceiver>. 
-    // I can't easily move it out if I still want it in AppState.
-    // However, I can just use the AppHandle in a tauri setup hook.
-
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -57,14 +51,15 @@ pub fn run() {
             commands::set_hot_cue,
             commands::get_hot_cues,
             commands::jump_to_hot_cue,
+            commands::clear_library,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
-            let state = handle.state::<AppState>();
             
             // Spawn a thread to poll engine state and emit events
             std::thread::spawn(move || {
                 loop {
+                    let state = handle.state::<AppState>();
                     if let Some(snapshot) = state.latest_state() {
                         let _ = handle.emit("engine-state", snapshot);
                     }

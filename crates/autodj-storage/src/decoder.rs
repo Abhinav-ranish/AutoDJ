@@ -100,12 +100,44 @@ fn find_ffmpeg() -> Result<PathBuf, DecoderError> {
         }
     }
 
-    // Attempt Windows standard path
+    // Attempt Windows standard paths
     if cfg!(windows) {
         if let Ok(program_files) = std::env::var("ProgramFiles") {
             let win_path = PathBuf::from(program_files).join("ffmpeg").join("bin").join("ffmpeg.exe");
             if win_path.exists() {
                 return Ok(win_path);
+            }
+        }
+        
+        // Check Winget packages
+        if let Ok(local_appdata) = std::env::var("LOCALAPPDATA") {
+            let winget_path = PathBuf::from(local_appdata)
+                .join("Microsoft")
+                .join("WinGet")
+                .join("Packages");
+            
+            if winget_path.exists() {
+                if let Ok(entries) = std::fs::read_dir(winget_path) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() && path.file_name().unwrap_or_default().to_string_lossy().contains("FFmpeg") {
+                            // Search for bin/ffmpeg.exe anywhere within this package directory
+                            let mut queue = vec![path];
+                            while let Some(dir) = queue.pop() {
+                                if let Ok(sub_entries) = std::fs::read_dir(dir) {
+                                    for sub_entry in sub_entries.flatten() {
+                                        let sub_path = sub_entry.path();
+                                        if sub_path.is_dir() {
+                                            queue.push(sub_path);
+                                        } else if sub_path.file_name() == Some(std::ffi::OsStr::new("ffmpeg.exe")) {
+                                            return Ok(sub_path);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

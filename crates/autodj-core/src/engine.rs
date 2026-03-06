@@ -176,7 +176,6 @@ impl EngineStateReceiver {
 
 /// The audio engine.
 pub struct AudioEngine {
-    _stream: Stream,
     pub command_sender: EngineCommandSender,
     pub state_receiver: EngineStateReceiver,
     pub sample_rate: u32,
@@ -184,7 +183,7 @@ pub struct AudioEngine {
 
 impl AudioEngine {
     /// Create and start the audio engine with default output device.
-    pub fn new(track_load_receiver: TrackLoadReceiver) -> Result<Self, String> {
+    pub fn new(track_load_receiver: TrackLoadReceiver) -> Result<(Self, Stream), String> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -333,12 +332,14 @@ impl AudioEngine {
             .play()
             .map_err(|e| format!("Failed to start audio stream: {e}"))?;
 
-        Ok(Self {
-            _stream: stream,
-            command_sender: EngineCommandSender { producer: cmd_prod },
-            state_receiver: EngineStateReceiver { consumer: state_cons },
-            sample_rate,
-        })
+        Ok((
+            Self {
+                command_sender: EngineCommandSender { producer: cmd_prod },
+                state_receiver: EngineStateReceiver { consumer: state_cons },
+                sample_rate,
+            },
+            stream,
+        ))
     }
 
     /// Execute a command on the engine state (called from the audio callback).

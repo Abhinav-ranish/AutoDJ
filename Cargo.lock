@@ -203,6 +203,7 @@ dependencies = [
  "autodj-analysis",
  "autodj-core",
  "autodj-storage",
+ "cpal",
  "dirs 5.0.1",
  "env_logger",
  "lofty",

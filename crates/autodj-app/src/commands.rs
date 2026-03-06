@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use lofty::prelude::*;
 use lofty::file::AudioFile;
-use lofty::tag::{Accessor, TaggedFileExt};
+use lofty::tag::Accessor;
 use tauri::State;
 
 /// Import audio files into the library.
@@ -128,7 +128,7 @@ pub async fn load_track(
     state.load_track_to_deck(deck_id, Arc::new(track_buffer));
 
     // Auto-sync BPM if profile exists
-    if let Ok(Some(snap)) = Ok(state.latest_state()) {
+    if let Some(snap) = state.latest_state() {
         let master_bpm = snap.master_bpm;
         let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
         if let Ok(Some(track)) = db.get_track(&track_id) {
@@ -289,28 +289,28 @@ pub fn set_speed(deck: DeckId, speed: f64, state: State<'_, AppState>) -> Result
 
 /// Analyze a track.
 #[tauri::command]
-pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let db = state.db.clone();
     let cache = state.cache.clone();
 
-    // Spawn a background thread to do the analysis
-    std::thread::spawn(move || {
+    // Run heavy CPU work in spawn_blocking
+    tauri::async_runtime::spawn_blocking(move || {
         let track = match db.lock().unwrap().get_track(&track_id) {
             Ok(Some(t)) => t,
-            _ => return,
+            _ => return Err("Track not found".to_string()),
         };
 
         if track.import_status != ImportStatus::Ready && track.import_status != ImportStatus::Analyzed {
             let _ = db.lock().unwrap().update_status(&track_id, ImportStatus::AnalysisFailed, Some("Track not ready"));
-            return;
+            return Err("Track not ready".to_string());
         }
 
-        let pcm_path = cache.base_dir().join(format!("{}.adjp", track.file_hash));
+        let pcm_path = cache.pcm_path(&track_id);
         let buffer = match autodj_core::buffer::TrackBuffer::open(&pcm_path) {
             Ok(b) => b,
             Err(_) => {
-                let _ = db.lock().unwrap().update_status(&track_id, "analysis_failed", Some("Failed to open PCM buffer"));
-                return;
+                let _ = db.lock().unwrap().update_status(&track_id, ImportStatus::AnalysisFailed, Some("Failed to open PCM buffer"));
+                return Err("Failed to open PCM buffer".to_string());
             }
         };
 
@@ -346,12 +346,14 @@ pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(),
                     profile.energy.average,
                 );
                 let _ = db_guard.update_status(&track_id, ImportStatus::Analyzed, None);
+                Ok(())
             }
             Err(e) => {
                 let _ = db.lock().unwrap().update_status(&track_id, ImportStatus::AnalysisFailed, Some(&e.to_string()));
+                Err(e.to_string())
             }
         }
-    });
+    }).await.map_err(|e| format!("Spawn blocking error: {e}"))??;
 
     Ok(())
 }
@@ -503,7 +505,7 @@ pub fn jump_to_hot_cue(
             .map(|s| s.master_bpm)
             .unwrap_or(128.0);
             
-        let beat = (position_ms as f64 * bpm / 60000.0) as u64;
+        let beat = (*position_ms as f64 * bpm / 60000.0) as u64;
         state.send_command(
             Command::Seek { deck, beat },
             CommandSource::User,
@@ -514,4 +516,13 @@ pub fn jump_to_hot_cue(
     }
 }
 
+/// Clear all tracks from the library and cache.
+#[tauri::command]
+pub fn clear_library(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.clear_all_tracks().map_err(|e| format!("DB: {e}"))?;
+    
+    state.cache.clear_all().map_err(|e| format!("Cache: {e}"))?;
+    Ok(())
+}
 

@@ -95,9 +95,9 @@ body {
 
 /* -- Header / Nav Bar -- */
 .header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   padding: var(--gap-sm) var(--gap-lg);
   background: var(--bg-deep);
   border-bottom: 1px solid var(--border);
@@ -105,7 +105,18 @@ body {
   flex-shrink: 0;
 }
 
+.header .logo {
+  justify-self: start;
+}
+
+.header .nav-tabs {
+  justify-self: center;
+}
+
 .logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-family: var(--font-display);
   font-weight: 800;
   font-size: 18px;
@@ -229,7 +240,7 @@ body {
 
 .track-list-header {
   display: grid;
-  grid-template-columns: 1fr 180px 80px 80px 100px 90px;
+  grid-template-columns: minmax(50px, 1fr) minmax(50px, 0.8fr) 80px 70px 80px auto;
   padding: var(--gap-sm) var(--gap-md);
   font-size: 11px;
   font-weight: 600;
@@ -245,7 +256,7 @@ body {
 
 .track-row {
   display: grid;
-  grid-template-columns: 1fr 180px 80px 80px 100px 90px;
+  grid-template-columns: minmax(50px, 1fr) minmax(50px, 0.8fr) 80px 70px 80px auto;
   padding: var(--gap-sm) var(--gap-md);
   font-size: 13px;
   border-bottom: 1px solid var(--border-subtle);
