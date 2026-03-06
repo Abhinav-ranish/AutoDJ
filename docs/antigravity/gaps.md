@@ -6,8 +6,8 @@
 |---|------|-----|-----|
 | B1 | `autodj-storage/src/decoder.rs` | `find_ffmpeg()` only checks Unix paths (`/opt/homebrew`, `/usr/local`, `/usr/bin`) + uses `which` — **breaks on Windows** | Add `%ProgramFiles%\ffmpeg\bin\ffmpeg.exe` + use `where` on Windows |
 | B2 | `autodj-app/src/state.rs` | `dirs_data_dir()` uses `std::env::var("HOME")` — **`HOME` doesn't exist on Windows** | Use Tauri `app.path().app_data_dir()` or the `dirs` crate |
-| B3 | `autodj-app/src/commands.rs:analyze_track` | Opens PCM at `cache.cache_dir().join("{file_hash}.adjp")` — `cache_dir()` method doesn't exist; filename is wrong too | Use `state.cache.pcm_path(&track_id)` |
-| B4 | `autodj-app/src/commands.rs:analyze_track` | Calls `state.db.clone()` inside the spawned thread — `Mutex<Database>` doesn't implement `Clone` | Change `AppState.db` to `Arc<Mutex<Database>>` |
+| ~~B3~~ | `autodj-app/src/commands.rs:analyze_track` | ~~Opens PCM at `cache.cache_dir()`~~ **(FIXED via `base_dir`)** | ~~Use `state.cache.pcm_path(&track_id)`~~ |
+| ~~B4~~ | `autodj-app/src/commands.rs:analyze_track` | ~~Calls `state.db.clone()` inside spawned thread~~ **(FIXED via `Arc`)** | ~~Change `AppState.db` to `Arc<Mutex<Database>>`~~ |
 
 ## 🟡 Medium Bugs (Wrong behavior)
 
@@ -42,30 +42,30 @@
 
 ---
 
-## ❌ Phase 6 — Transitions (Not Started)
+## ✅ Phase 6 — Transitions (Implemented)
 
+Transitions are largely implemented over the recent commits.
 - `autodj-core/src/transition.rs` — `TransitionTemplate` trait + `TransitionExpander` registry
-- `SmoothBeatmix` template (16-bar bass swap crossfade)
-- `FilterSweep` template (HP sweep + gain swap)
-- `EchoDrop` template (echo ramp → silence → drop)
-- `ExecuteTransition` variant in `Command` enum + `CommandValidator`
-- Engine: expand transitions into scheduled commands in `execute_command()`
+- `SmoothBeatmix`, `FilterSweep`, `EchoDrop` templates
+- `ExecuteTransition` variant in `Command` enum and handler in engine
 - Tauri: `execute_transition` command
-- UI: transition dropdown + duration slider + GO button
-- Tests for all three `expand()` functions
+- UI: Transition panel with template choice, duration, and triggering
+- **Remaining Gap**: Core engine integration tests for the `expand()` macro commands.
 
 ---
 
-## ❌ Phase 7 — AI Conductor (Not Started)
+## ✅ Phase 7 — AI Conductor (Implemented)
 
+The AI engine and corresponding UI are fully plumbed in!
 - `autodj-ai/src/camelot.rs` — Camelot wheel distance function
-- `autodj-ai/src/scorer.rs` — `HeuristicScorer` (tempo/key/energy/vocal/variety weights)
+- `autodj-ai/src/scorer.rs` — `HeuristicScorer` (tempo/key/energy/variety weights)
 - `autodj-ai/src/context.rs` — `AiContext` builder
-- `autodj-ai/src/llm.rs` — `LlmClient` (reqwest, rate limiting, 5s timeout)
-- `autodj-ai/src/planner.rs` — `AiPlanner` (LLM → validate → heuristic fallback)
-- `AppState`: add `AiPlanner` + `DjMode` tracking
+- `autodj-ai/src/llm.rs` — `LlmClient` (with response parsing logic)
+- `autodj-ai/src/planner.rs` — `AiPlanner` delegating to LLM or Scorer
+- `AppState`: tracks `AiPlanner` + `DjMode`
 - Tauri commands: `request_next_track`, `set_mode`, `set_ai_config`
-- UI: mode switcher (Manual/Assisted/AutoDJ), AI status badge, suggestion panel, config panel
+- UI: Mode switcher (Manual/Assisted/AutoDJ), AI status panel, track suggestions
+- **Remaining Gap**: Testing the LLM edge cases, rate limits, and scoring heuristics.
 
 ---
 
