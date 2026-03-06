@@ -21,7 +21,7 @@ pub struct Deck {
     pub track: Option<Arc<TrackBuffer>>,
 
     /// Playback position in frames (stereo frame index).
-    pub position: usize,
+    pub position: f64,
 
     /// Transport state.
     pub state: TransportState,
@@ -50,7 +50,7 @@ impl Deck {
     pub fn with_sample_rate(sample_rate: f32) -> Self {
         Self {
             track: None,
-            position: 0,
+            position: 0.0,
             state: TransportState::Empty,
             gain: 1.0,
             speed: 1.0,
@@ -68,7 +68,7 @@ impl Deck {
 
     /// Load a track buffer into the deck.
     pub fn load_track(&mut self, track: Arc<TrackBuffer>) {
-        self.position = 0;
+        self.position = 0.0;
         self.state = TransportState::Paused;
         self.loop_start = None;
         self.loop_end = None;
@@ -92,7 +92,7 @@ impl Deck {
     /// Seek to a specific frame position.
     pub fn seek(&mut self, frame: usize) {
         if let Some(track) = &self.track {
-            self.position = frame.min(track.total_frames().saturating_sub(1));
+            self.position = (frame as f64).min(track.total_frames().saturating_sub(1) as f64);
         }
     }
 
@@ -126,27 +126,38 @@ impl Deck {
         if self.state != TransportState::Playing {
             return (0.0, 0.0);
         }
-
+ 
         let track = match &self.track {
             Some(t) => t,
             None => return (0.0, 0.0),
         };
-
+ 
         // Loop: if we've reached the loop end, jump back to start
         if let (Some(start), Some(end)) = (self.loop_start, self.loop_end) {
-            if self.position >= end {
-                self.position = start;
+            if self.position >= end as f64 {
+                self.position = start as f64;
             }
         }
-
-        if self.position >= track.total_frames() {
+ 
+        let total_frames = track.total_frames();
+        if self.position >= total_frames as f64 {
             self.state = TransportState::Paused;
             return (0.0, 0.0);
         }
-
-        let (l, r) = track.get_frame(self.position);
-        self.position += 1;
-
+ 
+        // Linear Interpolation
+        let idx_low = self.position.floor() as usize;
+        let idx_high = (idx_low + 1).min(total_frames - 1);
+        let frac = (self.position - idx_low as f64) as f32;
+ 
+        let (l_low, r_low) = track.get_frame(idx_low);
+        let (l_high, r_high) = track.get_frame(idx_high);
+ 
+        let l = l_low + frac * (l_high - l_low);
+        let r = r_low + frac * (r_high - r_low);
+ 
+        self.position += self.speed;
+ 
         // Signal chain: EQ → Filter → Gain
         let (l, r) = self.eq.process(l, r);
         let (l, r) = self.filter.process(l, r);
@@ -241,11 +252,11 @@ mod tests {
         deck.load_track(buf);
 
         deck.seek(500);
-        assert_eq!(deck.position, 500);
+        assert_eq!(deck.position, 500.0);
 
         // Seek past end should clamp to last frame
         deck.seek(99999);
-        assert_eq!(deck.position, 999);
+        assert_eq!(deck.position, 999.0);
     }
 
     #[test]
@@ -267,7 +278,7 @@ mod tests {
         deck.next_frame();
         // After wrap: position was set to 100, then read and advanced to 101
         assert!(
-            deck.position >= 100 && deck.position <= 102,
+            deck.position >= 100.0 && deck.position <= 102.0,
             "Expected ~101, got {}",
             deck.position
         );

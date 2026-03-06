@@ -3,12 +3,15 @@ use autodj_core::buffer::TrackBuffer;
 use autodj_core::command::{Command, CommandSource, DeckId, EqBand};
 use autodj_core::engine::EngineStateSnapshot;
 use autodj_storage::cache::hash_file;
-use autodj_storage::db::TrackRecord;
+use autodj_storage::db::{TrackRecord, ImportStatus};
 use autodj_storage::decoder;
 use autodj_ai::{AiConfig, planner::AiDecision, context::build_context};
 use crate::state::DjMode;
 use std::path::PathBuf;
 use std::sync::Arc;
+use lofty::prelude::*;
+use lofty::file::AudioFile;
+use lofty::tag::{Accessor, TaggedFileExt};
 use tauri::State;
 
 /// Import audio files into the library.
@@ -36,15 +39,27 @@ pub async fn import_files(
             continue;
         }
 
-        // Extract title from filename
-        let title = path
+        // Extract metadata using lofty
+        let mut title = path
             .file_stem()
             .and_then(|s| s.to_str())
             .map(|s| s.to_string());
+        let mut artist = None;
+
+        if let Ok(tagged_file) = lofty::read_from_path(&path) {
+            if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+                if let Some(t) = tag.title().as_deref() {
+                    title = Some(t.to_string());
+                }
+                if let Some(a) = tag.artist().as_deref() {
+                    artist = Some(a.to_string());
+                }
+            }
+        }
 
         // Insert track record
         let track_id = db
-            .insert_track(&file_hash, path_str, title.as_deref(), None)
+            .insert_track(&file_hash, path_str, title.as_deref(), artist.as_deref())
             .map_err(|e| format!("DB insert: {e}"))?;
 
         // Copy original file
@@ -54,7 +69,7 @@ pub async fn import_files(
             .map_err(|e| format!("Copy: {e}"))?;
 
         // Update status to decoding
-        db.update_status(&track_id, "decoding", None)
+        db.update_status(&track_id, ImportStatus::Decoding, None)
             .map_err(|e| format!("DB: {e}"))?;
 
         // Drop the DB lock before decoding (takes time)
@@ -69,13 +84,13 @@ pub async fn import_files(
                 if let Ok(buf) = TrackBuffer::open(&pcm_path) {
                     db.update_duration(&track_id, buf.duration_ms() as i64).ok();
                 }
-                db.update_status(&track_id, "ready", None)
+                db.update_status(&track_id, ImportStatus::Ready, None)
                     .map_err(|e| format!("DB: {e}"))?;
                 imported_ids.push(track_id);
             }
             Err(e) => {
                 let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-                db.update_status(&track_id, "error", Some(&e.to_string()))
+                db.update_status(&track_id, ImportStatus::Error, Some(&e.to_string()))
                     .map_err(|e| format!("DB: {e}"))?;
                 log::error!("Decode failed for {}: {}", path_str, e);
             }
@@ -95,15 +110,11 @@ pub fn get_tracks(state: State<'_, AppState>) -> Result<Vec<TrackRecord>, String
 /// Load a track onto a deck.
 #[tauri::command]
 pub async fn load_track(
-    deck: String,
+    deck: DeckId,
     track_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let deck_id = match deck.to_lowercase().as_str() {
-        "a" => DeckId::A,
-        "b" => DeckId::B,
-        _ => return Err(format!("Invalid deck: {deck}")),
-    };
+    let deck_id = deck;
 
     // Open the PCM cache file
     let pcm_path = state.cache.pcm_path(&track_id);
@@ -115,6 +126,20 @@ pub async fn load_track(
         .map_err(|e| format!("Failed to open track buffer: {e}"))?;
 
     state.load_track_to_deck(deck_id, Arc::new(track_buffer));
+
+    // Auto-sync BPM if profile exists
+    if let Ok(Some(snap)) = Ok(state.latest_state()) {
+        let master_bpm = snap.master_bpm;
+        let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+        if let Ok(Some(track)) = db.get_track(&track_id) {
+            if let Some(track_bpm) = track.bpm {
+                if track_bpm > 0.0 {
+                    let speed = master_bpm / track_bpm;
+                    state.send_command(Command::SetSpeed { deck: deck_id, speed }, CommandSource::User);
+                }
+            }
+        }
+    }
 
     // Also send a Play command right away
     state.send_command(Command::Play { deck: deck_id }, CommandSource::User);
@@ -231,6 +256,37 @@ pub fn set_tempo(deck: DeckId, bpm: f64, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
+/// Sync a deck's tempo to the master clock.
+#[tauri::command]
+pub async fn sync_to_master(deck: DeckId, track_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let snapshot = state.latest_state().ok_or("Engine state unavailable")?;
+    let master_bpm = snapshot.master_bpm;
+
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    let track_json = db.get_track_profile_json(&track_id)
+        .map_err(|e| format!("DB error: {e}"))?
+        .ok_or_else(|| format!("No profile found for track {track_id}"))?;
+    
+    let profile: autodj_analysis::profile::TrackProfile = serde_json::from_str(&track_json)
+        .map_err(|e| format!("De-serialization error: {e}"))?;
+    
+    let track_bpm = profile.tempo.bpm;
+    if track_bpm <= 0.0 {
+        return Err("Invalid track BPM (0)".to_string());
+    }
+
+    let speed = master_bpm / track_bpm;
+    state.send_command(Command::SetSpeed { deck, speed }, CommandSource::User);
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_speed(deck: DeckId, speed: f64, state: State<'_, AppState>) -> Result<(), String> {
+    state.send_command(Command::SetSpeed { deck, speed }, CommandSource::User);
+    Ok(())
+}
+
 /// Analyze a track.
 #[tauri::command]
 pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(), String> {
@@ -244,8 +300,8 @@ pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(),
             _ => return,
         };
 
-        if track.import_status != "ready" && track.import_status != "analyzed" {
-            let _ = db.lock().unwrap().update_status(&track_id, "analysis_failed", Some("Track not ready"));
+        if track.import_status != ImportStatus::Ready && track.import_status != ImportStatus::Analyzed {
+            let _ = db.lock().unwrap().update_status(&track_id, ImportStatus::AnalysisFailed, Some("Track not ready"));
             return;
         }
 
@@ -289,10 +345,10 @@ pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(),
                     profile.loudness.integrated_lufs,
                     profile.energy.average,
                 );
-                let _ = db_guard.update_status(&track_id, "analyzed", None);
+                let _ = db_guard.update_status(&track_id, ImportStatus::Analyzed, None);
             }
             Err(e) => {
-                let _ = db.lock().unwrap().update_status(&track_id, "analysis_failed", Some(&e.to_string()));
+                let _ = db.lock().unwrap().update_status(&track_id, ImportStatus::AnalysisFailed, Some(&e.to_string()));
             }
         }
     });
@@ -403,6 +459,59 @@ pub async fn request_next_track(state: State<'_, AppState>) -> Result<AiDecision
         .map_err(|e| format!("AI Planning Error: {e}"))?;
     
     Ok(decision)
+}
+
+/// Set a hot cue for a track.
+#[tauri::command]
+pub fn set_hot_cue(
+    track_id: String,
+    cue_index: u32,
+    position_ms: u64,
+    label: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.save_hot_cue(&track_id, cue_index, position_ms, label.as_deref())
+        .map_err(|e| format!("DB error: {e}"))
+}
+
+/// Get all hot cues for a track.
+#[tauri::command]
+pub fn get_hot_cues(
+    track_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<(u32, u64, Option<String>)>, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.get_hot_cues(&track_id)
+        .map_err(|e| format!("DB error: {e}"))
+}
+
+/// Jump to a hot cue on a deck.
+#[tauri::command]
+pub fn jump_to_hot_cue(
+    deck: DeckId,
+    track_id: String,
+    cue_index: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    let cues = db.get_hot_cues(&track_id).map_err(|e| format!("DB error: {e}"))?;
+    
+    if let Some((_, position_ms, _)) = cues.iter().find(|(idx, _, _)| *idx == cue_index) {
+        // Convert ms to beats
+        let bpm = state.latest_state()
+            .map(|s| s.master_bpm)
+            .unwrap_or(128.0);
+            
+        let beat = (position_ms as f64 * bpm / 60000.0) as u64;
+        state.send_command(
+            Command::Seek { deck, beat },
+            CommandSource::User,
+        );
+        Ok(())
+    } else {
+        Err(format!("Hot cue {cue_index} not found for track {track_id}"))
+    }
 }
 
 

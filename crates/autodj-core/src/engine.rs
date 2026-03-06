@@ -373,6 +373,9 @@ impl AudioEngine {
             Command::SetTempo { bpm, .. } => {
                 transport.set_bpm(*bpm);
             }
+            Command::SetSpeed { deck, speed } => {
+                Self::get_deck_mut(*deck, deck_a, deck_b).speed = *speed;
+            }
             Command::SetEq { deck, band, gain_db } => {
                 Self::get_deck_mut(*deck, deck_a, deck_b).set_eq(*band, *gain_db);
             }

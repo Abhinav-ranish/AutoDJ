@@ -117,3 +117,85 @@ impl Mixer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_crossfader_linear() {
+        let mut mixer = Mixer::new(48000.0);
+        mixer.curve = CrossfaderCurve::Linear;
+
+        // Center
+        mixer.set_crossfader(0.0);
+        let gains = mixer.crossfader_gains();
+        assert_eq!(gains, (0.5, 0.5));
+
+        // Full A
+        mixer.set_crossfader(-1.0);
+        let gains = mixer.crossfader_gains();
+        assert_eq!(gains, (1.0, 0.0));
+
+        // Full B
+        mixer.set_crossfader(1.0);
+        let gains = mixer.crossfader_gains();
+        assert_eq!(gains, (0.0, 1.0));
+    }
+
+    #[test]
+    fn test_crossfader_equal_power() {
+        let mut mixer = Mixer::new(48000.0);
+        mixer.curve = CrossfaderCurve::EqualPower;
+
+        // Center: should be sqrt(0.5) ~ 0.707
+        mixer.set_crossfader(0.0);
+        let gains = mixer.crossfader_gains();
+        assert!((gains.0 - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+        assert!((gains.1 - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5);
+
+        // Full A
+        mixer.set_crossfader(-1.0);
+        let gains = mixer.crossfader_gains();
+        assert!((gains.0 - 1.0).abs() < 1e-5);
+        assert!((gains.1 - 0.0).abs() < 1e-5);
+
+        // Full B
+        mixer.set_crossfader(1.0);
+        let gains = mixer.crossfader_gains();
+        assert!((gains.0 - 0.0).abs() < 1e-5);
+        assert!((gains.1 - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_master_gain() {
+        let mut mixer = Mixer::new(48000.0);
+        mixer.set_master_gain_db(0.0);
+        assert_eq!(mixer.master_gain, 1.0);
+
+        mixer.set_master_gain_db(-6.0);
+        assert!((mixer.master_gain - 0.501187).abs() < 1e-4);
+
+        mixer.set_master_gain_db(-100.0);
+        assert_eq!(mixer.master_gain, 0.0);
+    }
+
+    #[test]
+    fn test_limiter() {
+        let mut mixer = Mixer::new(48000.0);
+        mixer.limiter_ceiling = 0.5; // Artificial low ceiling for testing
+        mixer.set_master_gain_db(0.0);
+        mixer.set_crossfader(-1.0); // Only Deck A
+        mixer.curve = CrossfaderCurve::Linear;
+
+        // Mix a loud signal that exceeds ceiling
+        let (l, r) = mixer.mix((1.0, 1.0), (0.0, 0.0));
+        
+        // Output should be strictly <= ceiling
+        assert!(l <= 0.5001);
+        assert!(r <= 0.5001);
+        
+        // Envelope should have dropped
+        assert!(mixer.limiter_envelope < 1.0);
+    }
+}

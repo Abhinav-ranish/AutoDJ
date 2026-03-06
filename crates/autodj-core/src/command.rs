@@ -84,6 +84,7 @@ pub enum Command {
 
     // -- Tempo --
     SetTempo { deck: DeckId, bpm: f64 },
+    SetSpeed { deck: DeckId, speed: f64 },
     SyncToMaster { deck: DeckId },
 
     // -- Mode --

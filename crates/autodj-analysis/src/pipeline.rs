@@ -22,22 +22,86 @@ pub fn analyze_track(
     let now = chrono::Utc::now().to_rfc3339();
     let duration_ms = (samples.len() as u64 * 1000) / (sample_rate as u64 * channels as u64);
 
-    // Note: To boost performance when scanning large libraries, these steps could
-    // be parallelized using `rayon`, but they run sequentially for now.
-    let tempo = detect_bpm(samples, sample_rate);
-    let beats = track_beats(samples, sample_rate, tempo.bpm);
-    let key = detect_key(samples, sample_rate);
-    let loudness = analyze_loudness(samples, sample_rate);
-    let energy = analyze_energy(samples, sample_rate, 0.5);
-    let sections = analyze_sections(duration_ms);
-    let waveform = analyze_waveform(samples, &file_hash, peaks_dir)
-        .map_err(|e| format!("Failed to generate waveform: {e}"))?;
+    // Parallelize independent analysis steps using rayon
+    let ((tempo, beat_info), (key, loudness, energy_info, sections, waveform)) = rayon::join(
+        || {
+            let t = detect_bpm(samples, sample_rate);
+            let b = track_beats(samples, sample_rate, t.bpm);
+            (t, b)
+        },
+        || {
+            let (key, (loudness, (energy, (sections, waveform)))) = rayon::join(
+                || detect_key(samples, sample_rate),
+                || rayon::join(
+                    || analyze_loudness(samples, sample_rate),
+                    || rayon::join(
+                        || analyze_energy(samples, sample_rate, 0.5),
+                        || rayon::join(
+                            || analyze_sections(duration_ms),
+                            || analyze_waveform(samples, &file_hash, peaks_dir)
+                        )
+                    )
+                )
+            );
+            (key, loudness, energy, sections, waveform)
+        }
+    );
 
-    // Regions placeholder
-    let regions = RegionInfo {
-        intro: None,
-        outro: None,
-        safe_loops: vec![],
+    let waveform = waveform.map_err(|e| format!("Failed to generate waveform: {e}"))?;
+
+    // Detect Safe Loops and Regions
+    let mut safe_loops = Vec::new();
+    let times_ms = &beat_info.times_ms;
+    let energy_curve = &energy_info.curve;
+    let window_ms = (energy_info.window_seconds * 1000.0) as u64;
+
+    if times_ms.len() > 32 {
+        // Scan for 16-beat (4 bar) safe loops
+        for i in (0..times_ms.len().saturating_sub(16)).step_by(16) {
+            let start_ms = times_ms[i];
+            let end_ms = times_ms[i + 16];
+            
+            // Calculate average energy and variance in this window
+            let start_idx = (start_ms / window_ms) as usize;
+            let end_idx = (end_ms / window_ms) as usize;
+            
+            if end_idx < energy_curve.len() && start_idx < end_idx {
+                let segment = &energy_curve[start_idx..end_idx];
+                let avg: f64 = segment.iter().sum::<f64>() / segment.len() as f64;
+                let variance: f64 = segment.iter().map(|&v| (v - avg).powi(2)).sum::<f64>() / segment.len() as f64;
+                
+                // If energy is stable (low variance) and not silence
+                if variance < 0.02 && avg > 0.1 {
+                    safe_loops.push(crate::profile::SafeLoop {
+                        start_beat: i as u64,
+                        length_bars: 4,
+                        quality: (1.0 - variance * 5.0).max(0.0f64),
+                    });
+                }
+            }
+        }
+    }
+
+    let intro = if !times_ms.is_empty() {
+        Some(crate::profile::TimeRange {
+            start_ms: times_ms[0],
+            end_ms: times_ms.get(32).cloned().unwrap_or(*times_ms.last().unwrap()),
+            confidence: 0.8,
+        })
+    } else { None };
+
+    let outro = if times_ms.len() > 32 {
+        Some(crate::profile::TimeRange {
+            start_ms: times_ms[times_ms.len() - 32],
+            end_ms: *times_ms.last().unwrap(),
+            confidence: 0.8,
+        })
+    } else { None };
+
+    let regions = crate::profile::RegionInfo {
+        intro,
+        outro,
+        safe_loops,
     };
 
     Ok(TrackProfile {
@@ -46,10 +110,10 @@ pub fn analyze_track(
         file_hash,
         analysis_timestamp: now,
         tempo,
-        beats,
+        beats: beat_info,
         key,
         loudness,
-        energy,
+        energy: energy_info,
         regions,
         sections,
         waveform,

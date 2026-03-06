@@ -65,7 +65,7 @@ interface DJStore {
     // Actions
     fetchTracks: () => Promise<void>;
     importFiles: (paths: string[]) => Promise<void>;
-    loadTrack: (deck: string, trackId: string) => Promise<void>;
+    loadTrack: (deck: "a" | "b", trackId: string) => Promise<void>;
     play: (deck: string) => Promise<void>;
     pause: (deck: string) => Promise<void>;
     seek: (deck: string, positionMs: number) => Promise<void>;
@@ -88,6 +88,7 @@ interface DJStore {
     setAiConfig: (config: any) => Promise<void>;
 
     setErrorToast: (msg: string | null) => void;
+    setEngineState: (state: EngineState) => void;
 }
 
 export const useStore = create<DJStore>((set, get) => ({
@@ -120,17 +121,19 @@ export const useStore = create<DJStore>((set, get) => ({
         try {
             await invoke("import_files", { paths });
             await get().fetchTracks();
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Import failed: ${e}`);
             console.error("Import failed:", e);
         }
         set({ importing: false });
     },
 
-    loadTrack: async (deck: string, trackId: string) => {
+    loadTrack: async (deck: "a" | "b", trackId: string) => {
         try {
             await invoke("load_track", { deck, trackId });
             set({ activeView: "dj" });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Load failed: ${e}`);
             console.error("Load failed:", e);
         }
     },
@@ -138,7 +141,8 @@ export const useStore = create<DJStore>((set, get) => ({
     play: async (deck: string) => {
         try {
             await invoke("play", { deck });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Play failed: ${e}`);
             console.error("Play failed:", e);
         }
     },
@@ -146,7 +150,8 @@ export const useStore = create<DJStore>((set, get) => ({
     pause: async (deck: string) => {
         try {
             await invoke("pause", { deck });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Pause failed: ${e}`);
             console.error("Pause failed:", e);
         }
     },
@@ -154,7 +159,8 @@ export const useStore = create<DJStore>((set, get) => ({
     seek: async (deck: string, positionMs: number) => {
         try {
             await invoke("seek", { deck, positionMs });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Seek failed: ${e}`);
             console.error("Seek failed:", e);
         }
     },
@@ -162,7 +168,8 @@ export const useStore = create<DJStore>((set, get) => ({
     setCrossfader: async (position: number) => {
         try {
             await invoke("set_crossfader", { position });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Crossfader failed: ${e}`);
             console.error("Crossfader failed:", e);
         }
     },
@@ -170,7 +177,8 @@ export const useStore = create<DJStore>((set, get) => ({
     setDeckGain: async (deck: string, gainDb: number) => {
         try {
             await invoke("set_deck_gain", { deck, gainDb });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Gain failed: ${e}`);
             console.error("Gain failed:", e);
         }
     },
@@ -178,7 +186,8 @@ export const useStore = create<DJStore>((set, get) => ({
     setEq: async (deck: string, band: string, gainDb: number) => {
         try {
             await invoke("set_eq", { deck, band, gainDb });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`EQ failed: ${e}`);
             console.error("EQ failed:", e);
         }
     },
@@ -186,7 +195,8 @@ export const useStore = create<DJStore>((set, get) => ({
     setFilter: async (deck: string, cutoffHz: number, resonance: number) => {
         try {
             await invoke("set_filter", { deck, cutoffHz, resonance });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Filter failed: ${e}`);
             console.error("Filter failed:", e);
         }
     },
@@ -194,7 +204,8 @@ export const useStore = create<DJStore>((set, get) => ({
     setLoop: async (deck: string, lengthBars: number) => {
         try {
             await invoke("set_loop", { deck, lengthBars });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Loop failed: ${e}`);
             console.error("Loop failed:", e);
         }
     },
@@ -202,7 +213,8 @@ export const useStore = create<DJStore>((set, get) => ({
     clearLoop: async (deck: string) => {
         try {
             await invoke("clear_loop", { deck });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Clear loop failed: ${e}`);
             console.error("Clear loop failed:", e);
         }
     },
@@ -210,20 +222,14 @@ export const useStore = create<DJStore>((set, get) => ({
     setTempo: async (deck: string, bpm: number) => {
         try {
             await invoke("set_tempo", { deck, bpm });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Set tempo failed: ${e}`);
             console.error("Set tempo failed:", e);
         }
     },
 
     pollEngineState: async () => {
-        try {
-            const state = await invoke<EngineState | null>("get_engine_state");
-            if (state) {
-                set({ engineState: state });
-            }
-        } catch (e) {
-            // Silently ignore polling errors
-        }
+        // Now handled via Tauri events
     },
 
     setActiveView: (view) => set({ activeView: view }),
@@ -263,7 +269,8 @@ export const useStore = create<DJStore>((set, get) => ({
         try {
             await invoke("set_mode", { mode });
             set({ mode });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Set mode failed: ${e}`);
             console.error("Set mode failed:", e);
         }
     },
@@ -298,8 +305,11 @@ export const useStore = create<DJStore>((set, get) => ({
     setAiConfig: async (config: any) => {
         try {
             await invoke("set_ai_config", { config });
-        } catch (e) {
+        } catch (e: any) {
+            get().setErrorToast(`Set AI config failed: ${e}`);
             console.error("Set AI config failed:", e);
         }
     },
+
+    setEngineState: (state: EngineState) => set({ engineState: state }),
 }));

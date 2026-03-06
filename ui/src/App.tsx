@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState } from "react";
-import { useStore } from "./store";
+import { useStore, EngineState } from "./store";
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 
 function formatTime(ms: number): string {
     const totalSeconds = Math.floor(ms / 1000);
@@ -102,7 +103,7 @@ function LibraryView() {
                                             className="deck-load-btn deck-a"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                loadTrack("A", track.id);
+                                                loadTrack("a", track.id);
                                             }}
                                         >
                                             A
@@ -111,7 +112,7 @@ function LibraryView() {
                                             className="deck-load-btn deck-b"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                loadTrack("B", track.id);
+                                                loadTrack("b", track.id);
                                             }}
                                         >
                                             B
@@ -344,13 +345,7 @@ function sliderToFilter(val: number): number {
 // ─── DJ View ─────────────────────────────────────────────────────
 
 function DJView() {
-    const { engineState, setCrossfader, pollEngineState } = useStore();
-
-    // Poll engine state at ~10fps (100ms) to reduce IPC overhead
-    useEffect(() => {
-        const interval = setInterval(pollEngineState, 100);
-        return () => clearInterval(interval);
-    }, [pollEngineState]);
+    const { engineState, setCrossfader } = useStore();
 
     return (
         <div className="dj-view">
@@ -435,7 +430,7 @@ function AiPanel() {
                                 <div style={{ color: "#888", fontSize: "10px" }}>{suggestedTrack.artist || "Unknown"} • {suggestedTrack.bpm?.toFixed(1)} BPM • {suggestedTrack.key}</div>
                             </div>
                             <button
-                                onClick={() => loadTrack("B", suggestedTrack.id)} // Target B for now
+                                onClick={() => loadTrack("b", suggestedTrack.id)} // Target b for now
                                 style={{ padding: "5px 10px", background: "#2196F3", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer" }}
                             >
                                 LOAD DECK B
@@ -515,7 +510,16 @@ function TransitionsPanel() {
 // ─── App ─────────────────────────────────────────────────────────
 
 export default function App() {
-    const { activeView, setActiveView, engineState, mode } = useStore();
+    const { activeView, setActiveView, engineState, mode, setEngineState } = useStore();
+
+    useEffect(() => {
+        const unlisten = listen<EngineState>("engine-state", (event) => {
+            setEngineState(event.payload);
+        });
+        return () => {
+            unlisten.then(f => f());
+        };
+    }, [setEngineState]);
 
     return (
         <div className="app">

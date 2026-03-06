@@ -14,6 +14,51 @@ pub enum DbError {
     Serde(#[from] serde_json::Error),
 }
 
+/// Status of a track in the library.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ImportStatus {
+    Pending,
+    Decoding,
+    Ready,
+    Analyzed,
+    AnalysisFailed,
+    Error,
+}
+
+impl ImportStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Decoding => "decoding",
+            Self::Ready => "ready",
+            Self::Analyzed => "analyzed",
+            Self::AnalysisFailed => "analysis_failed",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl rusqlite::ToSql for ImportStatus {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(rusqlite::types::ToSqlOutput::from(self.as_str()))
+    }
+}
+
+impl rusqlite::types::FromSql for ImportStatus {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        match value.as_str()? {
+            "pending" => Ok(Self::Pending),
+            "decoding" => Ok(Self::Decoding),
+            "ready" => Ok(Self::Ready),
+            "analyzed" => Ok(Self::Analyzed),
+            "analysis_failed" => Ok(Self::AnalysisFailed),
+            "error" => Ok(Self::Error),
+            _ => Err(rusqlite::types::FromSqlError::InvalidType),
+        }
+    }
+}
+
 /// A track record in the database.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackRecord {
@@ -23,7 +68,7 @@ pub struct TrackRecord {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub duration_ms: Option<i64>,
-    pub import_status: String,
+    pub import_status: ImportStatus,
     pub error_message: Option<String>,
     pub bpm: Option<f64>,
     pub key: Option<String>,
@@ -111,6 +156,14 @@ impl Database {
                 ai_decision_json TEXT,
                 session_id      TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS hot_cues (
+                track_id   TEXT NOT NULL REFERENCES tracks(id),
+                cue_index  INTEGER NOT NULL,
+                position_ms INTEGER NOT NULL,
+                label       TEXT,
+                PRIMARY KEY (track_id, cue_index)
+            );
             ",
         )?;
         Ok(())
@@ -159,11 +212,10 @@ impl Database {
         Ok(count > 0)
     }
 
-    /// Update track import status.
     pub fn update_status(
         &self,
         track_id: &str,
-        status: &str,
+        status: ImportStatus,
         error: Option<&str>,
     ) -> Result<(), DbError> {
         let now = std::time::SystemTime::now()
@@ -307,6 +359,33 @@ impl Database {
             None => Ok(None),
         }
     }
+
+    /// Set a hot cue for a track.
+    pub fn save_hot_cue(&self, track_id: &str, cue_index: u32, position_ms: u64, label: Option<&str>) -> Result<(), DbError> {
+        self.conn.execute(
+            "INSERT INTO hot_cues (track_id, cue_index, position_ms, label)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(track_id, cue_index) DO UPDATE SET
+                position_ms=excluded.position_ms,
+                label=excluded.label",
+            params![track_id, cue_index, position_ms as i64, label],
+        )?;
+        Ok(())
+    }
+
+    /// Get all hot cues for a track.
+    pub fn get_hot_cues(&self, track_id: &str) -> Result<Vec<(u32, u64, Option<String>)>, DbError> {
+        let mut stmt = self.conn.prepare("SELECT cue_index, position_ms, label FROM hot_cues WHERE track_id = ?1 ORDER BY cue_index")?;
+        let rows = stmt.query_map(params![track_id], |row| {
+            Ok((row.get(0)?, row.get::<_, i64>(1)? as u64, row.get(2)?))
+        })?;
+
+        let mut cues = Vec::new();
+        for row in rows {
+            cues.push(row?);
+        }
+        Ok(cues)
+    }
 }
 
 #[cfg(test)]
@@ -322,7 +401,7 @@ mod tests {
 
         let track = db.get_track(&id).unwrap().unwrap();
         assert_eq!(track.title.as_deref(), Some("Test Track"));
-        assert_eq!(track.import_status, "pending");
+        assert_eq!(track.import_status, ImportStatus::Pending);
     }
 
     #[test]
@@ -339,8 +418,8 @@ mod tests {
         let db = Database::open_memory().unwrap();
         let id = db.insert_track("h", "/p.mp3", None, None).unwrap();
 
-        db.update_status(&id, "decoded", None).unwrap();
+        db.update_status(&id, ImportStatus::Decoding, None).unwrap();
         let track = db.get_track(&id).unwrap().unwrap();
-        assert_eq!(track.import_status, "decoded");
+        assert_eq!(track.import_status, ImportStatus::Decoding);
     }
 }

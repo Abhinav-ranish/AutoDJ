@@ -4,8 +4,8 @@
 
 | # | File | Bug | Fix |
 |---|------|-----|-----|
-| B1 | `autodj-storage/src/decoder.rs` | `find_ffmpeg()` only checks Unix paths (`/opt/homebrew`, `/usr/local`, `/usr/bin`) + uses `which` — **breaks on Windows** | Add `%ProgramFiles%\ffmpeg\bin\ffmpeg.exe` + use `where` on Windows |
-| B2 | `autodj-app/src/state.rs` | `dirs_data_dir()` uses `std::env::var("HOME")` — **`HOME` doesn't exist on Windows** | Use Tauri `app.path().app_data_dir()` or the `dirs` crate |
+| ~~B1~~ | `autodj-storage/src/decoder.rs` | ~~`find_ffmpeg()` only checks Unix paths~~ | **(FIXED)** |
+| ~~B2~~ | `autodj-app/src/state.rs` | ~~`dirs_data_dir()` uses `std::env::var("HOME")`~~ | **(FIXED via `dirs` crate)** |
 | ~~B3~~ | `autodj-app/src/commands.rs:analyze_track` | ~~Opens PCM at `cache.cache_dir()`~~ **(FIXED via `base_dir`)** | ~~Use `state.cache.pcm_path(&track_id)`~~ |
 | ~~B4~~ | `autodj-app/src/commands.rs:analyze_track` | ~~Calls `state.db.clone()` inside spawned thread~~ **(FIXED via `Arc`)** | ~~Change `AppState.db` to `Arc<Mutex<Database>>`~~ |
 
@@ -13,20 +13,20 @@
 
 | # | File | Bug | Fix |
 |---|------|-----|-----|
-| B5 | `autodj-app/src/commands.rs:seek` | Hardcoded `bpm = 128.0` for ms → beat conversion | Read BPM from current engine state snapshot |
-| B6 | `autodj-app/src/commands.rs:set_loop` | `start_beat = 0` always — loop always starts from track beginning | Use current deck `position_ms` from engine state to compute `start_beat` |
-| B7 | `autodj-core/src/engine.rs:SyncToMaster` | Command is a no-op (`let _ = deck;`) | After Phase 5 analysis, look up `TrackProfile.tempo.bpm` and adjust `deck.speed` multiplier |
+| B5 | `autodj-app/src/commands.rs:seek` | Hardcoded `bpm = 128.0` for ms → beat conversion | **(FIXED)** |
+| B6 | `autodj-app/src/commands.rs:set_loop` | `start_beat = 0` always — loop always starts from track beginning | **(FIXED)** |
+| B7 | `autodj-core/src/engine.rs:SyncToMaster` | Command is a no-op (`let _ = deck;`) | **(FIXED via interpolation + SetSpeed)** |
 
-## 🟠 Low / Code Quality Issues
+## ✅ Low / Code Quality Issues (Implemented)
 
-| # | File | Issue |
-|---|------|-------|
-| C1 | `autodj-analysis/src/pipeline.rs` | Comment says "rayon parallel" but pipeline runs entirely sequentially | Remove misleading comment or add `rayon` |
-| C2 | `autodj-core/src/mixer.rs` | No unit tests | Add tests for limiter behavior, equal-power curve |
-| C3 | `autodj-app/src/commands.rs` | `parse_deck()` string matching is error-prone | Use `serde` deserialization with `#[serde(rename)]` |
-| C4 | `autodj-app` | Import status is raw strings (`"pending"`, `"ready"`, etc.) scattered across crates | Replace with a typed `ImportStatus` enum |
-| C5 | `ui/src/store.ts` | All errors go to `console.error` and are silently swallowed | Add a toast / notification system in the UI |
-| C6 | `ui/src` | Engine state polled every 33 ms via `setInterval` IPC round-trips | Replace with Tauri `emit`/`listen` events pushed from Rust |
+| # | File | Issue | Status |
+|---|------|-------|--------|
+| C1 | `autodj-analysis/src/pipeline.rs` | sequential pipeline | **(FIXED via rayon)** |
+| C2 | `autodj-core/src/mixer.rs` | No unit tests | **(FIXED)** |
+| C3 | `autodj-app/src/commands.rs` | error-prone matching | **(FIXED via DeckId)** |
+| C4 | `autodj-storage/src/db.rs` | raw status strings | **(FIXED via ImportStatus)** |
+| C5 | `ui/src/store.ts` | errors swallowed | **(FIXED via toast)** |
+| C6 | `ui/src` | IPC polling | **(FIXED via events)** |
 
 ---
 
@@ -34,11 +34,11 @@
 
 | Module | Plan | Reality |
 |--------|------|---------|
-| `key.rs` | Chromagram + Krumhansl-Kessler profiles | **Stub** — always returns `"C" / "8B"`, confidence 0.1 |
+| `key.rs` | Chromagram + Krumhansl-Kessler profiles | **FIXED** — implemented basic STFT chromagram matching |
 | `sections.rs` | Self-similarity matrix + novelty function | **Time-only heuristic** — splits by 15% intro / body / 15% outro |
 | `regions` (safe loops) | Populated from beat grid + energy | **Always empty** (`safe_loops: vec![]`) |
 | `beats.rs` | DP beat tracker (Ellis 2007) | Synthetic uniform grid from BPM only — no DP tracker |
-| Parallelism | rayon for BPM/Key/Loudness in parallel | Sequential — no rayon used |
+| Parallelism | rayon for BPM/Key/Loudness in parallel | **FIXED** — implemented in `pipeline.rs` |
 
 ---
 
@@ -85,9 +85,9 @@ The AI engine and corresponding UI are fully plumbed in!
 ### High Value / Low Effort
 | Feature | Notes |
 |---------|-------|
-| **Auto-sync BPM on load** | When a track with a `TrackProfile` is loaded, use `profile.tempo.bpm` to set `deck.speed` automatically |
-| **ID3 tag reading on import** | Use `lofty` crate to fill `title`, `artist`, `album`, `artwork` during `import_files` |
-| **Hot cues** | Store 8 cue points per deck in DB; jump-to-cue buttons in UI — huge DJ workflow improvement |
+| **Auto-sync BPM on load** | When a track with a `TrackProfile` is loaded, use `profile.tempo.bpm` to set `deck.speed` automatically — **Implemented** |
+| **ID3 tag reading on import** | Use `lofty` crate to fill `title`, `artist`, `album`, `artwork` during `import_files` — **Implemented** |
+| **Hot cues** | Store 8 cue points per deck in DB; jump-to-cue buttons in UI — **Implemented DB + Backend Commands** |
 | **Beat nudge buttons** | ±0.5% tempo adjust buttons (`<<` / `>>`) for fine sync without full BPM match |
 | **Pitch range slider** | ±6 / ±10 / ±16% tempo range selector |
 | **Keyboard shortcuts** | Space = play/pause, Z/X = loop toggle, Q/W = EQ kill |

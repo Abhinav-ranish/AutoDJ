@@ -2,8 +2,10 @@
 
 pub mod commands;
 pub mod state;
-
+ 
 use state::AppState;
+use tauri::Manager;
+use tauri::Emitter;
 
 /// Run the Tauri application.
 ///
@@ -19,6 +21,12 @@ pub fn run() {
             std::process::exit(1);
         }
     };
+
+    let engine_receiver = app_state.engine_receiver.lock().unwrap();
+    // We need to move the receiver out or clone the Arc if it was an Arc... 
+    // Wait, AppState.engine_receiver is Mutex<EngineStateReceiver>. 
+    // I can't easily move it out if I still want it in AppState.
+    // However, I can just use the AppHandle in a tauri setup hook.
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -45,7 +53,27 @@ pub fn run() {
             commands::request_next_track,
             commands::set_mode,
             commands::set_ai_config,
+            commands::sync_to_master,
+            commands::set_hot_cue,
+            commands::get_hot_cues,
+            commands::jump_to_hot_cue,
         ])
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let state = handle.state::<AppState>();
+            
+            // Spawn a thread to poll engine state and emit events
+            std::thread::spawn(move || {
+                loop {
+                    if let Some(snapshot) = state.latest_state() {
+                        let _ = handle.emit("engine-state", snapshot);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(33)); // ~30Hz
+                }
+            });
+            
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
