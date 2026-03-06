@@ -25,3 +25,15 @@ fdf117e (HEAD -> main, origin/main, origin/HEAD) feat(app,ui): initialize Tauri 
 d8e09a5 docs: initialize project specifications and architecture
 d3560fa Initial commit
 ```
+
+## Phase 5: Track Analysis Implementation Highlights
+
+- **`autodj-analysis` Crate**: Implemented a comprehensive audio analysis pipeline capable of extracting BPM, beat grids, keys (Camelot mapped), perceived loudness (LUFS), dynamic energy levels, segment markers, and renderable waveform peaks.
+- **Background Orchestration**: Hooked the analysis functionality directly into the SQLite database and the Tauri React UI, processing everything concurrently off the main thread.
+
+## Phase 6 & 7: Transitions and AI Conductor Implementation Highlights
+
+- **Transition Expander Registry (`autodj-core/src/transition.rs`)**: Enables creating smart audio transitions linking high-level logic to primitive Engine Command Sequences. Shipped with `SmoothBeatmix`, `FilterSweep`, and `EchoDrop` presets.
+- **AI Backend (`autodj-ai`)**: Implemented a two-stage approach leveraging an LLM client mapping AI plans to transition queues with parameter overrides.
+- **Harmonics Heuristics Fallback (`autodj-ai/src/scorer.rs`, `camelot.rs`)**: Ensured harmonic constraints dictate mix progressions even without a network connection. Built algorithms rating distance around the Camelot Wheel.
+- **DJ View Integration**: Added AI analysis toggle inside of the UI store spanning the track library with AI suggestions injected dynamically.

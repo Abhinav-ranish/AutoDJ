@@ -88,6 +88,9 @@ pub enum Command {
     // -- Mode --
     SetMode { mode: DjMode },
     ResumeAI,
+
+    // -- Transition --
+    ExecuteTransition { template: String, params: serde_json::Value },
 }
 
 /// A command wrapped with scheduling and source metadata.
@@ -145,6 +148,9 @@ impl CommandValidator {
                 })
             }
             // All other commands pass through unchanged.
+            Command::ExecuteTransition { template, params } => {
+                Some(Command::ExecuteTransition { template, params })
+            }
             Command::SetLoop { deck, start_beat, length_bars } => {
                 Some(Command::SetLoop {
                     deck,
