@@ -10,6 +10,8 @@ export interface TrackRecord {
     duration_ms: number | null;
     import_status: string;
     error_message: string | null;
+    bpm: number | null;
+    key: string | null;
 }
 
 export interface DeckSnapshot {
@@ -60,6 +62,8 @@ interface DJStore {
     setTempo: (deck: string, bpm: number) => Promise<void>;
     pollEngineState: () => Promise<void>;
     setActiveView: (view: "dj" | "library") => void;
+    analyzeTrack: (trackId: string) => Promise<void>;
+    getTrackProfile: (trackId: string) => Promise<any>;
 }
 
 export const useStore = create<DJStore>((set, get) => ({
@@ -189,4 +193,24 @@ export const useStore = create<DJStore>((set, get) => ({
     },
 
     setActiveView: (view) => set({ activeView: view }),
+
+    analyzeTrack: async (trackId: string) => {
+        try {
+            await invoke("analyze_track", { trackId });
+            // Re-fetch tracks to update status immediately
+            await get().fetchTracks();
+        } catch (e) {
+            console.error("Analyze failed:", e);
+        }
+    },
+
+    getTrackProfile: async (trackId: string) => {
+        try {
+            const json = await invoke<string | null>("get_track_profile", { trackId });
+            if (json) return JSON.parse(json);
+        } catch (e) {
+            console.error("Get profile failed:", e);
+        }
+        return null;
+    },
 }));

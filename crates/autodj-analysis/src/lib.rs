@@ -3,13 +3,15 @@
 //! This crate will contain BPM detection, key detection, beat tracking,
 //! energy curves, section segmentation, and waveform peak generation.
 
-/// Placeholder for the track profile.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TrackProfile {
-    pub track_id: String,
-    pub bpm: Option<f64>,
-    pub key: Option<String>,
-    pub camelot: Option<String>,
-    pub energy_avg: Option<f64>,
-    pub duration_ms: u64,
-}
+pub mod beats;
+pub mod bpm;
+pub mod energy;
+pub mod key;
+pub mod loudness;
+pub mod pipeline;
+pub mod profile;
+pub mod sections;
+pub mod waveform;
+
+pub use pipeline::analyze_track;
+pub use profile::*;

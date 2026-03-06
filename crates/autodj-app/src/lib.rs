@@ -38,6 +38,8 @@ pub fn run() {
             commands::set_loop,
             commands::clear_loop,
             commands::set_tempo,
+            commands::analyze_track,
+            commands::get_track_profile,
             commands::get_engine_state,
         ])
         .run(tauri::generate_context!())

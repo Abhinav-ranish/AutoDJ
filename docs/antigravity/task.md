@@ -22,20 +22,20 @@
 - [x] UI: loop buttons (4/8/16 bars) with active indicator
 - [x] Tests: 31 total (25 core + 6 storage)
 
-## Phase 5: Milestone D — Analysis
-- [ ] Expand `TrackProfile` struct to full spec schema
-- [ ] BPM detection (spectral flux + autocorrelation) — `bpm.rs`
-- [ ] Beat tracking (DP tracker + downbeat detection) — `beats.rs`
-- [ ] Key detection (chromagram + Krumhansl-Kessler) — `key.rs`
-- [ ] Loudness measurement (LUFS, RMS, true peak) — `loudness.rs`
-- [ ] Energy curve (windowed RMS + drop candidates) — `energy.rs`
-- [ ] Section segmentation (self-similarity matrix) — `sections.rs`
-- [ ] Waveform peak generation — `waveform.rs`
-- [ ] Analysis pipeline orchestrator — `pipeline.rs`
-- [ ] DB: `save_track_profile` / `get_track_profile`
-- [ ] Tauri: `analyze_track` / `get_track_profile` commands
-- [ ] UI: BPM/key display, waveform canvas, analyze button
-- [ ] Tests: BPM on synthetic audio, key detection, pipeline integration
+## Phase 5: Milestone D — Analysis ✅
+- [x] Expand `TrackProfile` struct to full spec schema
+- [x] BPM detection (spectral flux + autocorrelation) — `bpm.rs`
+- [x] Beat tracking (DP tracker + downbeat detection) — `beats.rs`
+- [x] Key detection (chromagram + Krumhansl-Kessler) — `key.rs`
+- [x] Loudness measurement (LUFS, RMS, true peak) — `loudness.rs`
+- [x] Energy curve (windowed RMS + drop candidates) — `energy.rs`
+- [x] Section segmentation (self-similarity matrix) — `sections.rs`
+- [x] Waveform peak generation — `waveform.rs`
+- [x] Analysis pipeline orchestrator — `pipeline.rs`
+- [x] DB: `save_track_profile` / `get_track_profile`
+- [x] Tauri: `analyze_track` / `get_track_profile` commands
+- [x] UI: BPM/key display, waveform canvas, analyze button
+- [x] Tests: BPM on synthetic audio, key detection, pipeline integration
 
 ## Phase 6: Milestone E — Transitions
 - [ ] `TransitionTemplate` trait + `TransitionExpander` registry — `transition.rs`

@@ -25,6 +25,8 @@ pub struct TrackRecord {
     pub duration_ms: Option<i64>,
     pub import_status: String,
     pub error_message: Option<String>,
+    pub bpm: Option<f64>,
+    pub key: Option<String>,
 }
 
 /// The database handle.
@@ -188,8 +190,10 @@ impl Database {
     /// Get all tracks.
     pub fn get_all_tracks(&self) -> Result<Vec<TrackRecord>, DbError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, file_hash, original_path, title, artist, duration_ms, import_status, error_message
-             FROM tracks ORDER BY created_at DESC",
+            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.key_name
+             FROM tracks t
+             LEFT JOIN track_profiles p ON t.id = p.track_id
+             ORDER BY t.created_at DESC",
         )?;
 
         let rows = stmt.query_map([], |row| {
@@ -202,6 +206,8 @@ impl Database {
                 duration_ms: row.get(5)?,
                 import_status: row.get(6)?,
                 error_message: row.get(7)?,
+                bpm: row.get(8)?,
+                key: row.get(9)?,
             })
         })?;
 
@@ -212,11 +218,72 @@ impl Database {
         Ok(tracks)
     }
 
+    /// Save a track profile to the database.
+    pub fn save_track_profile(
+        &self,
+        track_id: &str,
+        profile_json: &str,
+        bpm: f64,
+        bpm_confidence: f64,
+        key_name: &str,
+        camelot: &str,
+        key_confidence: f64,
+        lufs: f64,
+        energy_avg: f64,
+    ) -> Result<(), DbError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        self.conn.execute(
+            "INSERT INTO track_profiles (track_id, profile_json, bpm, bpm_confidence, key_name, camelot, key_confidence, lufs, energy_avg, analyzed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(track_id) DO UPDATE SET
+                profile_json=excluded.profile_json,
+                bpm=excluded.bpm,
+                bpm_confidence=excluded.bpm_confidence,
+                key_name=excluded.key_name,
+                camelot=excluded.camelot,
+                key_confidence=excluded.key_confidence,
+                lufs=excluded.lufs,
+                energy_avg=excluded.energy_avg,
+                analyzed_at=excluded.analyzed_at",
+            params![
+                track_id,
+                profile_json,
+                bpm,
+                bpm_confidence,
+                key_name,
+                camelot,
+                key_confidence,
+                lufs,
+                energy_avg,
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get a track profile as JSON string.
+    pub fn get_track_profile_json(&self, track_id: &str) -> Result<Option<String>, DbError> {
+        let mut stmt = self.conn.prepare("SELECT profile_json FROM track_profiles WHERE track_id = ?1")?;
+        let mut rows = stmt.query_map(params![track_id], |row| row.get(0))?;
+        
+        match rows.next() {
+            Some(Ok(json)) => Ok(Some(json)),
+            Some(Err(e)) => Err(DbError::Sqlite(e)),
+            None => Ok(None),
+        }
+    }
+
     /// Get a single track by ID.
     pub fn get_track(&self, track_id: &str) -> Result<Option<TrackRecord>, DbError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, file_hash, original_path, title, artist, duration_ms, import_status, error_message
-             FROM tracks WHERE id = ?1",
+            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.key_name
+             FROM tracks t
+             LEFT JOIN track_profiles p ON t.id = p.track_id
+             WHERE t.id = ?1",
         )?;
 
         let mut rows = stmt.query_map(params![track_id], |row| {
@@ -229,6 +296,8 @@ impl Database {
                 duration_ms: row.get(5)?,
                 import_status: row.get(6)?,
                 error_message: row.get(7)?,
+                bpm: row.get(8)?,
+                key: row.get(9)?,
             })
         })?;
 

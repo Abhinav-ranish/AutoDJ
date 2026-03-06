@@ -231,6 +231,80 @@ pub fn set_tempo(deck: String, bpm: f64, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
+/// Analyze a track.
+#[tauri::command]
+pub fn analyze_track(track_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.clone();
+    let cache = state.cache.clone();
+
+    // Spawn a background thread to do the analysis
+    std::thread::spawn(move || {
+        let track = match db.get_track(&track_id) {
+            Ok(Some(t)) => t,
+            _ => return,
+        };
+
+        if track.import_status != "ready" && track.import_status != "analyzed" {
+            let _ = db.update_status(&track_id, "analysis_failed", Some("Track not ready"));
+            return;
+        }
+
+        let pcm_path = cache.cache_dir().join(format!("{}.adjp", track.file_hash));
+        let buffer = match autodj_core::buffer::TrackBuffer::open(&pcm_path) {
+            Ok(b) => b,
+            Err(_) => {
+                let _ = db.update_status(&track_id, "analysis_failed", Some("Failed to open PCM buffer"));
+                return;
+            }
+        };
+
+        // Extract all samples into a Vec<f32> for analysis
+        let total = buffer.total_frames() * 2;
+        let mut samples = Vec::with_capacity(total);
+        for i in 0..total {
+            samples.push(buffer.get_sample(i));
+        }
+
+        let peaks_dir = cache.cache_dir();
+
+        match autodj_analysis::analyze_track(
+            track_id.clone(),
+            track.file_hash.clone(),
+            &samples,
+            buffer.header.sample_rate,
+            buffer.header.channels,
+            peaks_dir,
+        ) {
+            Ok(profile) => {
+                let json = serde_json::to_string(&profile).unwrap_or_default();
+                let _ = db.save_track_profile(
+                    &track_id,
+                    &json,
+                    profile.tempo.bpm,
+                    profile.tempo.confidence,
+                    &profile.key.key,
+                    &profile.key.camelot,
+                    profile.key.confidence,
+                    profile.loudness.integrated_lufs,
+                    profile.energy.average,
+                );
+                let _ = db.update_status(&track_id, "analyzed", None);
+            }
+            Err(e) => {
+                let _ = db.update_status(&track_id, "analysis_failed", Some(&e));
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// Get a track profile.
+#[tauri::command]
+pub fn get_track_profile(track_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    state.db.get_track_profile_json(&track_id).map_err(|e| e.to_string())
+}
+
 /// Get the current engine state snapshot.
 #[tauri::command]
 pub fn get_engine_state(state: State<'_, AppState>) -> Result<Option<EngineStateSnapshot>, String> {

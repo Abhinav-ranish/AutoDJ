@@ -70,8 +70,12 @@ function LibraryView() {
                             <span className="track-artist">
                                 {track.artist || "Unknown Artist"}
                             </span>
-                            <span className="track-duration">—</span>
-                            <span className="track-duration">—</span>
+                            <span className="track-duration">
+                                {track.bpm ? track.bpm.toFixed(1) : "—"}
+                            </span>
+                            <span className="track-duration">
+                                {track.key || "—"}
+                            </span>
                             <span className="track-duration">
                                 {track.duration_ms ? formatTime(track.duration_ms) : "—"}
                             </span>
@@ -82,8 +86,18 @@ function LibraryView() {
                                     {track.import_status === "ready" ? "✓" : "⟳"}{" "}
                                     {track.import_status}
                                 </span>
-                                {track.import_status === "ready" && (
+                                {(track.import_status === "ready" || track.import_status === "analyzed") && (
                                     <>
+                                        <button
+                                            className="deck-load-btn"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                useStore.getState().analyzeTrack(track.id);
+                                            }}
+                                            title="Analyze Track"
+                                        >
+                                            ⚡
+                                        </button>
                                         <button
                                             className="deck-load-btn deck-a"
                                             onClick={(e) => {

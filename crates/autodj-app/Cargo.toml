@@ -8,6 +8,7 @@ autodj-core = { path = "../autodj-core" }
 autodj-storage = { path = "../autodj-storage" }
 autodj-analysis = { path = "../autodj-analysis" }
 autodj-ai = { path = "../autodj-ai" }
+
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
