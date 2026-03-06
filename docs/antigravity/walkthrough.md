@@ -37,3 +37,9 @@ d3560fa Initial commit
 - **AI Backend (`autodj-ai`)**: Implemented a two-stage approach leveraging an LLM client mapping AI plans to transition queues with parameter overrides.
 - **Harmonics Heuristics Fallback (`autodj-ai/src/scorer.rs`, `camelot.rs`)**: Ensured harmonic constraints dictate mix progressions even without a network connection. Built algorithms rating distance around the Camelot Wheel.
 - **DJ View Integration**: Added AI analysis toggle inside of the UI store spanning the track library with AI suggestions injected dynamically.
+
+## UI Verification Demo
+
+Here is a recording showing the functional React frontend for Auto-DJ:
+
+![AutoDJ UI Demo](/Users/ragebaiter/.gemini/antigravity/brain/ed7c4ebe-84d6-498f-802e-8192e2300b5f/autodj_app_demo_1772763182766.webp)

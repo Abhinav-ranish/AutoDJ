@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "identifier": "com.autodj.app",
   "build": {
-    "beforeDevCommand": "cd ../../ui && npm run dev",
+    "beforeDevCommand": "cd $(git rev-parse --show-toplevel)/ui && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "cd ../../ui && npm run build",
+    "beforeBuildCommand": "cd $(git rev-parse --show-toplevel)/ui && npm run build",
     "frontendDist": "../../ui/dist"
   },
   "app": {
