@@ -14,8 +14,8 @@
 - [x] SetEq/SetFilter commands + Tauri handlers + UI (sliders, knobs, kill)
 
 ## Phase 4: Milestone C — Sync + Quantization ✅
-- [x] `SchedulePoint` resolution in `TransportClock` (NextBeat, NextBar, AfterBeats, etc.)
-- [x] Pre-allocated pending command queue in audio callback (sorted by target_sample)
+- [x] `SchedulePoint` resolution in `TransportClock`
+- [x] Pre-allocated pending command queue in audio callback
 - [x] Deck loops (set_loop, clear_loop) with beat-aligned wrapping
 - [x] Deck seek + SetLoop/ClearLoop/Seek commands
 - [x] Tauri commands: seek, set_loop, clear_loop, set_tempo
@@ -23,6 +23,41 @@
 - [x] Tests: 31 total (25 core + 6 storage)
 
 ## Phase 5: Milestone D — Analysis
+- [ ] Expand `TrackProfile` struct to full spec schema
+- [ ] BPM detection (spectral flux + autocorrelation) — `bpm.rs`
+- [ ] Beat tracking (DP tracker + downbeat detection) — `beats.rs`
+- [ ] Key detection (chromagram + Krumhansl-Kessler) — `key.rs`
+- [ ] Loudness measurement (LUFS, RMS, true peak) — `loudness.rs`
+- [ ] Energy curve (windowed RMS + drop candidates) — `energy.rs`
+- [ ] Section segmentation (self-similarity matrix) — `sections.rs`
+- [ ] Waveform peak generation — `waveform.rs`
+- [ ] Analysis pipeline orchestrator — `pipeline.rs`
+- [ ] DB: `save_track_profile` / `get_track_profile`
+- [ ] Tauri: `analyze_track` / `get_track_profile` commands
+- [ ] UI: BPM/key display, waveform canvas, analyze button
+- [ ] Tests: BPM on synthetic audio, key detection, pipeline integration
+
 ## Phase 6: Milestone E — Transitions
+- [ ] `TransitionTemplate` trait + `TransitionExpander` registry — `transition.rs`
+- [ ] `SmoothBeatmix` template (16-bar bass swap)
+- [ ] `FilterSweep` template (HP sweep + fade)
+- [ ] `EchoDrop` template (echo → silence → drop)
+- [ ] `ExecuteTransition` command variant + validation
+- [ ] Engine: expand transitions into scheduled commands
+- [ ] Tauri: `execute_transition` command
+- [ ] UI: transition control panel (template dropdown, duration slider)
+- [ ] Tests: expand functions, full engine integration
+
 ## Phase 7: Milestone F — AI Conductor
+- [ ] Heuristic scorer with configurable weights — `scorer.rs`
+- [ ] Camelot wheel distance function — `camelot.rs`
+- [ ] AI context builder — `context.rs`
+- [ ] AI planner (LLM first, heuristic fallback) — `planner.rs`
+- [ ] LLM client (reqwest, rate limiting, timeout) — `llm.rs`
+- [ ] AI decision JSON schema validation
+- [ ] Tauri: `request_next_track`, `set_mode`, `set_ai_config` commands
+- [ ] AppState: add AiPlanner + DjMode tracking
+- [ ] UI: mode switcher, AI status, suggestion panel, config panel
+- [ ] Tests: scorer ranking, camelot distance, mock LLM, fallback path
+
 ## Phase 8: Milestone G — Polish + Export

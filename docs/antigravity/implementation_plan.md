@@ -1,158 +1,247 @@
-# Auto-DJ — Milestone A Implementation Plan
+# Auto-DJ — Phases 5, 6, 7 Implementation Plan
 
-Build a minimal runnable system: import an audio file, decode it with FFmpeg, and play it through cpal.
+## Phase 5: Milestone D — Track Analysis
 
-## 15 Bullet-Point Summary
+Fully implement the `autodj-analysis` crate to produce `TrackProfile` data (BPM, key, beats, energy, sections, waveform peaks) per the spec in `docs/04-track-analysis.md`.
 
-1. **Rust workspace** — 5 crates: `autodj-core`, `autodj-analysis`, `autodj-storage`, `autodj-ai`, `autodj-app` (Tauri)
-2. **Tauri 2 shell** — React + Vite frontend in `ui/`, Rust backend in `crates/autodj-app/`
-3. **SQLite schema** — `tracks`, `track_profiles`, `preferences`, sessions/history tables via `rusqlite`
-4. **File import pipeline** — drag-drop or file picker → SHA-256 hash → copy to `~/.autodj/originals/`
-5. **FFmpeg decode** — spawn ffmpeg, pipe stdout, write canonical PCM (48 kHz/stereo/f32) to `~/.autodj/cache/pcm/`
-6. **PCM cache** — custom ADJP binary format with minimal header + raw f32 interleaved samples
-7. **cpal audio output** — stable callback reading PCM from memory-mapped cache file
-8. **SPSC command queue** — `ringbuf` crate for lock-free UI→engine command passing
-9. **State snapshots** — engine pushes read-only state to main thread at 30 Hz via second ring buffer
-10. **Deck model** — single deck initially (play/pause, position tracking, gain)
-11. **Basic React UI** — library list, import button, single deck with play/pause and waveform placeholder
-12. **Command API foundation** — `LoadTrack`, `Play`, `Pause`, `SetDeckGain` commands with validation
-13. **Error handling** — `thiserror` for library crates, `anyhow` in the app binary, fallback ladder
-14. **No AI yet** — AI integration deferred to Milestone F; scaffolding only
-15. **Tests** — unit tests for PCM cache read/write, command validation, and SPSC queue
+### New Dependencies
+
+#### [MODIFY] [Cargo.toml](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/Cargo.toml)
+Add workspace deps: `rustfft = "6"`, `rayon = "1"`.
+
+#### [MODIFY] [Cargo.toml](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/Cargo.toml)
+Add: `rustfft`, `rayon`, `autodj-storage` (for `TrackBuffer` access).
 
 ---
 
-## Proposed Changes
+### autodj-analysis Crate
 
-### Workspace Root
+#### [MODIFY] [lib.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/lib.rs)
+- Expand `TrackProfile` struct to match the full JSON schema from spec (tempo, beats, key, loudness, energy, regions, sections, waveform).
+- Add sub-structs: `TempoResult`, `BeatGrid`, `KeyResult`, `LoudnessInfo`, `EnergyCurve`, `RegionInfo`, `Section`, `WaveformMeta`.
+- Add `pub mod` declarations for all new modules.
+- Add `AnalysisError` enum with `thiserror`.
 
-#### [NEW] [Cargo.toml](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/Cargo.toml)
-Rust workspace manifest listing all 5 crates.
+#### [NEW] [bpm.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/bpm.rs)
+- `detect_bpm(samples: &[f32], sample_rate: u32) -> TempoResult`
+- Spectral flux onset detection (STFT with 2048-sample window, 512 hop).
+- Autocorrelation of onset function over 4-8 second windows.
+- Peak picking → candidate BPM list, scored by plausibility (prefer 80-160 range).
+- Fallback: inter-onset interval histogram if confidence < 0.5.
 
----
+#### [NEW] [beats.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/beats.rs)
+- `track_beats(samples: &[f32], sample_rate: u32, bpm: f64) -> BeatGrid`
+- Dynamic programming beat tracker (Ellis 2007 style).
+- Downbeat detection via bar-level periodicity.
+- Fallback: synthetic grid from BPM starting at first onset.
 
-### autodj-core (Audio Engine)
+#### [NEW] [key.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/key.rs)
+- `detect_key(samples: &[f32], sample_rate: u32) -> KeyResult`
+- Chromagram via STFT (12-bin pitch class profile).
+- Correlate with Krumhansl-Kessler profiles (24 total: 12 major + 12 minor).
+- Map to Camelot wheel using lookup table from spec.
 
-#### [NEW] [lib.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/lib.rs)
-Re-exports engine, deck, mixer, command, transport modules.
+#### [NEW] [loudness.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/loudness.rs)
+- `measure_loudness(samples: &[f32], sample_rate: u32) -> LoudnessInfo`
+- Integrated LUFS (simplified BS.1770), true peak (4x oversample), RMS, dynamic range.
 
-#### [NEW] [engine.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/engine.rs)
-`AudioEngine` struct: owns cpal stream, SPSC queues, deck, mixer. Processes commands in the audio callback.
+#### [NEW] [energy.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/energy.rs)
+- `compute_energy_curve(samples: &[f32], sample_rate: u32) -> EnergyCurve`
+- Windowed RMS (0.5s default) with A-weighting.
+- Normalize to 0.0-1.0. Identify drop candidates (>2x increase within 2s after a local min).
 
-#### [NEW] [deck.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/deck.rs)
-`Deck` struct with play/pause/seek, position tracking, gain. Reads from `TrackBuffer`.
+#### [NEW] [sections.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/sections.rs)
+- `segment_track(energy: &EnergyCurve, beats: &BeatGrid) -> Vec<Section>`
+- Self-similarity matrix from per-beat feature vectors (energy + chromagram).
+- Novelty function via checkerboard kernel convolution.
+- Label by energy profile (intro, buildup, drop, breakdown, outro).
+- Fallback: equal thirds.
 
-#### [NEW] [mixer.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/mixer.rs)
-Simple pass-through mixer (single deck for now). Master gain + basic limiter.
+#### [NEW] [waveform.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/waveform.rs)
+- `generate_peaks(samples: &[f32], samples_per_pixel: usize) -> Vec<(f32, f32)>`
+- Min/max pairs per pixel bucket. Write to binary `.peaks` file.
 
-#### [NEW] [command.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/command.rs)
-Command enum, SchedulePoint, CommandValidator, ownership model types.
-
-#### [NEW] [transport.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/transport.rs)
-TransportClock struct (BPM, beat/bar counting). Stub for Milestone C.
-
-#### [NEW] [buffer.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/buffer.rs)
-`TrackBuffer` — wraps memory-mapped PCM data with sample-accurate reading.
-
-#### [NEW] [Cargo.toml](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/Cargo.toml)
-Dependencies: `cpal`, `ringbuf`, `memmap2`, `thiserror`.
-
----
-
-### autodj-storage (SQLite + File Cache)
-
-#### [NEW] [lib.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-storage/src/lib.rs)
-Re-exports db, cache, decoder modules.
-
-#### [NEW] [db.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-storage/src/db.rs)
-`Database` struct wrapping `rusqlite::Connection`. Schema init, track CRUD, pref get/set.
-
-#### [NEW] [cache.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-storage/src/cache.rs)
-PCM cache management (ADJP format read/write), file hashing (SHA-256).
-
-#### [NEW] [decoder.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-storage/src/decoder.rs)
-FFmpeg spawner: `decode_to_pcm(input_path) → Result<PathBuf>`. Pipes ffmpeg stdout to ADJP file.
-
-#### [NEW] [Cargo.toml](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-storage/Cargo.toml)
-Dependencies: `rusqlite` (bundled), `sha2`, `thiserror`, `serde`, `serde_json`.
+#### [NEW] [pipeline.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/pipeline.rs)
+- `analyze_track(pcm_path: &Path) -> Result<TrackProfile, AnalysisError>`
+- Orchestrates the full pipeline: BPM → Beats → Key, Loudness, Energy (parallel via rayon) → Sections, Safe Loops → Waveform Peaks.
+- Steps 1, 3, 4, 5, 8 run concurrently; steps 2, 6, 7 depend on step 1.
 
 ---
 
-### autodj-analysis (Stub)
+### Integration
 
-#### [NEW] [lib.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-analysis/src/lib.rs)
-Stub module — re-exports placeholder types. Actual analysis in Milestone D.
+#### [MODIFY] [db.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-storage/src/db.rs)
+- Add `save_track_profile(&self, track_id: &str, profile: &TrackProfile)` — writes to `track_profiles` table (schema already exists).
+- Add `get_track_profile(&self, track_id: &str) -> Option<TrackProfile>` — reads back.
 
----
+#### [MODIFY] [commands.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-app/src/commands.rs)
+- Add `analyze_track` Tauri command that triggers analysis on a background thread and returns the profile.
+- Add `get_track_profile` Tauri command.
 
-### autodj-ai (Stub)
+#### [MODIFY] [store.ts](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/src/store.ts)
+- Add `analyzeTrack(trackId: string)` and `getTrackProfile(trackId: string)` store actions.
 
-#### [NEW] [lib.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-ai/src/lib.rs)
-Stub module — placeholder types. AI integration in Milestone F.
+#### [MODIFY] [App.tsx](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/src/App.tsx)
+- Display BPM, key (Camelot), and energy in the library list.
+- Add waveform display component (render `.peaks` data on canvas).
+- Add "Analyze" button per track.
 
----
+### Verification
 
-### autodj-app (Tauri Application)
-
-#### [NEW] [main.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-app/src/main.rs)
-Tauri entry point. Initializes DB, engine, and registers commands.
-
-#### [NEW] [commands.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-app/src/commands.rs)
-Tauri command handlers: `import_files`, `get_tracks`, `play`, `pause`, `load_track`, `set_deck_gain`.
-
-#### [NEW] [state.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-app/src/state.rs)
-`AppState` struct holding `Database`, `AudioEngine`, shared state for Tauri.
-
-#### [NEW] [Cargo.toml](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-app/Cargo.toml)
-Dependencies: `tauri`, `autodj-core`, `autodj-storage`, `serde`, `serde_json`.
-
-#### [NEW] [tauri.conf.json](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-app/tauri.conf.json)
-Tauri configuration: window size, title, security settings, build config.
-
----
-
-### React UI
-
-#### [NEW] [package.json](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/package.json)
-React + Vite + TypeScript + Zustand + @tauri-apps/api.
-
-#### [NEW] [index.html](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/index.html)
-Entry HTML with root div.
-
-#### [NEW] [App.tsx](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/src/App.tsx)
-Main app layout: Library view + single Deck view.
-
-#### [NEW] [store.ts](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/src/store.ts)
-Zustand store with DJState interface, Tauri event listeners.
-
-#### [NEW] [index.css](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/src/index.css)
-Dark theme design system with CSS variables.
-
----
-
-## Verification Plan
-
-### Automated Tests
-
-Run all Rust tests:
 ```bash
-cd /Users/ragebaiter/Documents/GitHub/AutoDJ && cargo test --workspace
+cargo test --workspace
 ```
+- Unit tests for BPM detection on a synthetic 128 BPM sine wave.
+- Unit tests for key detection on a known-key chromatic signal.
+- Unit test for waveform peak generation.
+- Integration test: `pipeline::analyze_track` on a test PCM file → verify profile fields populate.
 
-Tests to write:
-1. `autodj-storage::cache` — write ADJP file, read back, verify header + samples match
-2. `autodj-storage::decoder` — decode a bundled test WAV, verify PCM output
-3. `autodj-core::command` — validate clamping behaviour for out-of-range values
-4. `autodj-core::command` — verify invalid commands are rejected
+---
 
-### Manual Verification
+## Phase 6: Milestone E — Transitions
 
-1. Run the app: `cd /Users/ragebaiter/Documents/GitHub/AutoDJ && cargo tauri dev`
-2. Import an MP3 using the import button
-3. Verify the track appears in the library list
-4. Click on the track → load to deck
-5. Click play → audio should be audible through the default audio device
-6. Click pause → audio stops
+Implement the transition template system that expands high-level transition commands into sequences of primitive engine commands.
 
-> [!IMPORTANT]
-> FFmpeg must be installed on the system for the decode pipeline to work. On macOS: `brew install ffmpeg`.
+### autodj-core Changes
+
+#### [NEW] [transition.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/transition.rs)
+- `TransitionTemplate` trait with `fn expand(&self, params) -> Vec<ScheduledCommand>`.
+- `SmoothBeatmix` struct: 16-bar mix with bass swap.
+  - Expand into: LoadTrack → Play → interpolated crossfader → bass swap EQ at bar N → final crossfader + Pause.
+- `FilterSweep` struct: HP filter sweep on outgoing + incoming fade.
+  - Expand into: HP filter interpolation from `start_hz` to `end_hz` over N bars + gain swap.
+- `EchoDrop` struct: echo/delay on outgoing → silence → drop incoming.
+  - Expand into: gain ramp down with echo feedback → silence gap → incoming play from specified section.
+- `TransitionExpander` — registry of templates. `expand(template_name, params) -> Result<Vec<ScheduledCommand>>`.
+
+#### [MODIFY] [command.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/command.rs)
+- Add `ExecuteTransition { template: String, params: serde_json::Value }` variant to `Command` enum.
+- Add validation for `ExecuteTransition` in `CommandValidator` (check template exists, params valid).
+
+#### [MODIFY] [engine.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/engine.rs)
+- When an `ExecuteTransition` command is received, call `TransitionExpander::expand()` and enqueue the resulting scheduled commands into the pending queue.
+
+#### [MODIFY] [lib.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-core/src/lib.rs)
+- Add `pub mod transition;`.
+
+---
+
+### Integration
+
+#### [MODIFY] [commands.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-app/src/commands.rs)
+- Add `execute_transition(template: String, params: Value)` Tauri command.
+
+#### [MODIFY] [store.ts](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/src/store.ts)
+- Add `executeTransition(template: string, params: object)` store action.
+
+#### [MODIFY] [App.tsx](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/src/App.tsx)
+- Add transition control panel: dropdown (smooth_beatmix, filter_sweep, echo_drop) + "Go" button.
+- Duration slider (4-64 bars).
+
+### Verification
+
+```bash
+cargo test --workspace
+```
+- Unit test: `SmoothBeatmix::expand()` → verify correct command sequence and timing.
+- Unit test: `FilterSweep::expand()` → verify HP filter ramp values.
+- Unit test: `EchoDrop::expand()` → verify silence gap and incoming start.
+- Integration test: Full engine with two loaded tracks, execute a transition, verify deck states change correctly.
+
+---
+
+## Phase 7: Milestone F — AI Conductor
+
+Implement the AI planner, heuristic scorer, and LLM integration per `docs/05-ai-conductor.md`.
+
+### New Dependencies
+
+#### [MODIFY] [Cargo.toml](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/Cargo.toml)
+Add workspace deps: `reqwest = { version = "0.12", features = ["json"] }`, `tokio = { version = "1", features = ["full"] }`.
+
+#### [MODIFY] [Cargo.toml](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-ai/Cargo.toml)
+Add: `reqwest`, `tokio`, `autodj-analysis` (for `TrackProfile`), `autodj-core` (for `Command`, `DeckId`).
+
+---
+
+### autodj-ai Crate
+
+#### [MODIFY] [lib.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-ai/src/lib.rs)
+- Expand `AiConfig` with API key, endpoint URL, weights, and prompt template path.
+- Add `pub mod` declarations for all new modules.
+- Add `AiError` enum.
+
+#### [NEW] [scorer.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-ai/src/scorer.rs)
+- `HeuristicScorer` struct with configurable weights (tempo, key, energy, vocal, variety).
+- `score(current: &TrackProfile, candidate: &TrackProfile, recent: &[String], intent: &str) -> f64`
+- Compatibility functions per spec:
+  - Tempo: `1.0 - abs(bpm_a - bpm_b) / 20.0`, clamped [0,1].
+  - Key: Camelot distance → 1.0 / 0.6 / 0.2.
+  - Energy: depends on intent (maintain/build/drop).
+  - Variety: recency penalty.
+- `select_next(current: &TrackProfile, candidates: &[TrackProfile], recent: &[String], intent: &str) -> TrackProfile` — returns top scorer.
+
+#### [NEW] [context.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-ai/src/context.rs)
+- `AiContext` struct matching the AI input schema from spec.
+- `build_context(engine_state, library, preferences) -> AiContext` — assembles the full JSON context.
+
+#### [NEW] [planner.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-ai/src/planner.rs)
+- `AiPlanner` struct (owns `HeuristicScorer` + optional LLM client).
+- `plan_next(context: &AiContext) -> Result<AiDecision, AiError>` — tries LLM first, falls back to heuristic.
+- `AiDecision` struct matching the AI output schema (decision, track_selection, transition_plan).
+- JSON schema validation of LLM responses.
+- Rate limiting (max 1 call per 10 seconds), timeout (5 seconds).
+
+#### [NEW] [llm.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-ai/src/llm.rs)
+- `LlmClient` struct wrapping `reqwest::Client`.
+- `query(prompt: &str, config: &AiConfig) -> Result<String, AiError>` — sends request to OpenAI-compatible API.
+- Prompt assembly using the template from spec with substituted context values.
+- Response parsing + JSON validation against output schema.
+
+#### [NEW] [camelot.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-ai/src/camelot.rs)
+- `camelot_distance(a: &str, b: &str) -> u32` — distance on the Camelot wheel.
+- Full Camelot lookup table from spec.
+- Used by both `scorer.rs` and `key.rs` in analysis.
+
+---
+
+### Integration
+
+#### [MODIFY] [commands.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-app/src/commands.rs)
+- Add `request_next_track` Tauri command (triggers AI planner).
+- Add `set_mode(mode: DjMode)` Tauri command.
+- Add `set_ai_config(config: AiConfig)` Tauri command.
+
+#### [MODIFY] [state.rs](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/crates/autodj-app/src/state.rs)
+- Add `AiPlanner` to `AppState`.
+- Add mode tracking (`DjMode`).
+
+#### [MODIFY] [store.ts](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/src/store.ts)
+- Add `requestNextTrack()`, `setMode(mode)`, `setAiConfig(config)` actions.
+
+#### [MODIFY] [App.tsx](file:///Users/ragebaiter/Documents/GitHub/AutoDJ/ui/src/App.tsx)
+- Add mode switcher (Manual / Assisted / AutoDJ).
+- Add AI status indicator (idle, thinking, fallback).
+- Add "Next Track" suggestion panel showing AI reasoning.
+- Add AI config panel (API key input, model selector, weight sliders).
+
+### Verification
+
+```bash
+cargo test --workspace
+```
+- Unit test: `HeuristicScorer::score()` with known inputs → verify ranking.
+- Unit test: `camelot_distance` for all edge cases (same key, adjacent, opposite).
+- Unit test: `AiDecision` JSON parsing and validation.
+- Integration test: `AiPlanner::plan_next()` with mock LLM (return canned JSON) → verify decision parses and validates.
+- Integration test: Fallback path (LLM timeout) → verify heuristic scorer is used.
+
+---
+
+## Summary Table
+
+| Phase | Milestone | New Files | Modified Files | New Dependencies |
+|-------|-----------|-----------|----------------|------------------|
+| 5 | D — Analysis | 7 new modules in `autodj-analysis` | db.rs, commands.rs, store.ts, App.tsx | `rustfft`, `rayon` |
+| 6 | E — Transitions | 1 new module in `autodj-core` | command.rs, engine.rs, lib.rs, commands.rs, store.ts, App.tsx | None |
+| 7 | F — AI Conductor | 5 new modules in `autodj-ai` | lib.rs, commands.rs, state.rs, store.ts, App.tsx | `reqwest`, `tokio` |
