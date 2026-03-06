@@ -1,74 +1,71 @@
-# Auto-DJ — Master Task List
+# MyTune — Task Checklist
 
-## Phase 1: Architecture Documentation ✅
-- [x] 10 docs under `docs/`
+## Phase 0: Planning & Architecture
+- [x] Create implementation plan and get user approval
+- [x] Define folder structure for monorepo
+- [x] Write architecture decision records (ADRs)
 
-## Phase 2: Milestone A —## Verification execution
-- [x] Run backend unit tests (`cargo test --workspace`)
-- [x] Review any failed sections (All backend tests passed)
-- [/] Optionally spin up a browser subagent to review the UI directly
-- [x] cpal audio engine + SPSC queues + basic React UI
+## Phase 1: Project Scaffold
+- [x] Initialize monorepo structure (`/frontend`, `/supabase`, `/ai`, `/scripts`)
+- [x] Set up `frontend/` with Vite + React + TailwindCSS + React Router
+- [x] Configure TypeScript, ESLint, Prettier
+- [x] Set up Supabase project config files
 
-## Phase 3: Milestone B — Two## Milestone B — Mixing
-- [x] 3-band EQ and SVF filter per deck
-- [x] Signal chain processing (PCM → EQ → Filter → Gain)
-- [x] Engine commands (`SetEq`, `SetFilter`, `SetDeckGain`)
-- [x] Tauri command handlers for EQ/Filter/Gain
-obs, kill)
+## Phase 2: Database & Auth (Backend)
+- [x] Write Supabase SQL migrations for all tables:
+  - Users, Quizzes, Roadmaps, Lessons, Progress
+  - Feedback, LessonMetadata, UserInteractions
+- [x] Enable pgvector extension (lesson embeddings)
+- [x] Configure Row Level Security (RLS) policies
+- [x] Set up Supabase Auth (OAuth + email/password)
+- [x] Write Edge Functions: roadmap-generate, stripe-checkout, stripe-webhook, explain-persona
 
-## Phase 4:## Milestone C — Sync & Quantize
-- [x] Command schedule resolution via `TransportClock`
-- [x] Padding command queue in engine callback
-- [x] Loop handling with beat wrapping
-- [x] Deck seek functionality
-op/ClearLoop/Seek commands
-- [x] Tauri commands: seek, set_loop, clear_loop, set_tempo
-- [x] UI: loop buttons (4/8/16 bars) with active indicator
-- [x] Tests: 31 total (25 core + 6 storage)
+## Phase 3: Frontend — Core Pages
+- [x] `LandingPage` — hero, CTA, features
+- [x] `AuthPage` — login/signup via Supabase Auth
+- [x] `OnboardingQuiz` — instrument, level, genres, goals
+- [x] `RoadmapPage` — personalized roadmap display
+- [x] `LessonPlayer` — YouTube embeds + hosted content + exercises
+- [x] `Dashboard` — streaks, progress, badges
+- [x] `SettingsPage` — profile, subscription
 
-## Phase 5: Milestone D — Analysis ✅
-- [x] Expand `TrackProfile` struct to full spec schema
-- [x] BPM detection (spectral flux + autocorrelation) — `bpm.rs`
-- [x] Beat tracking (DP tracker + downbeat detection) — `beats.rs`
-- [x] Key detection (chromagram + Krumhansl-Kessler) — `key.rs`
-- [x] Loudness measurement (LUFS, RMS, true peak) —## Milestone D — Analysis
-- [x] Full `TrackProfile` schema integration
-- [x] BPM detection (`bpm.rs`)
-- [x] Key detection (`key.rs`)
-- [x] Loudness measurement (`loudness.rs`)
-- [x] Energy curve computation (`energy.rs`)
-- [x] Waveform peak generation (`waveform.rs`)
-- [x] Parallel pipeline Orchestration (`pipeline.rs` via rayon)
-- [/] Beat tracking (Synthetic grid confirmed)
-- [/] Section segmentation (Heuristic confirmed)
-k` / `get_track_profile` commands
-- [x] UI: BPM/key display, waveform canvas, analyze button
-- [x] Tests: BPM on synthetic audio, key detection, pipeline integration
+## Phase 4: AI Personalization System
+- [x] User feature vector construction (from interactions)
+- [x] K-means / DBSCAN persona clustering pipeline
+- [x] Store persona + vectors in Supabase (pgvector)
 
-## Phase 6:## Milestone E — Transitions
-- [x] Transition templates (`SmoothBeatmix`, `FilterSweep`, `EchoDrop`)
-- [x] Transition command expansion logic
-stry — `transition.rs`
-- [x] `SmoothBeatmix` template (16-bar bass swap)
-- [x] `FilterSweep` template (HP sweep + fade)
-- [x] `EchoDrop` template (echo → silence → drop)
-- [x] `ExecuteTransition` command variant + validation
-- [x] Engine: expand transitions into scheduled commands
-- [x] Tauri: `execute_transition` command
-- [x] UI: transition control panel (template dropdown, duration slider)
-- [x] Tests: expand functions, full engine integration
+## Phase 5: Recommendation Engine
+- [x] Content-based filtering (lesson metadata similarity)
+- [x] Collaborative filtering (user-to-user)
+- [x] Hybrid scoring + ranking
 
-## Phase 7:## Milestone F — AI Conductor
-- [x] Heuristic scorer & Camelot math
-- [x] AI context builder and planner
-- [x] LLM client implementation and parsing
-ction — `camelot.rs`
-- [x] AI context builder — `context.rs`
-- [x] AI planner (LLM first, heuristic fallback) — `planner.rs`
-- [x] LLM client (reqwest, rate limiting, timeout) — `llm.rs`
-- [x] AI decision JSON schema validation
-- [x] Tauri: `request_next_track`, `set_mode`, `set_ai_config` commands
-- [x] UI: mode switcher, AI status, suggestion panel, config panel
-- [x] Tests: scorer ranking, camelot distance, mock LLM, fallback path
+## Phase 6: Reinforcement Learning
+- [x] Reward function (+5 complete, +3 replay, -2 skip)
+- [x] Multi-armed bandit (epsilon-greedy + UCB + Thompson)
 
-## Phase 8: Milestone G — Polish + Export
+## Phase 7: LLM Persona Explanations
+- [x] Prompt template for persona summaries
+- [x] API integration (OpenAI / Anthropic via Edge Function)
+- [x] Display persona card in dashboard and roadmap
+
+## Phase 8: Payments (Stripe)
+- [x] Stripe products + price config setup instructions
+- [x] Checkout session Edge Function
+- [x] Webhook handler (subscription lifecycle)
+- [x] Premium feature gating in frontend settings
+
+## Phase 9: Analytics (PostHog)
+- [x] PostHog SDK integration in frontend
+- [x] Key event tracking (page views, lesson start/complete, quiz submit)
+
+## Phase 10: Testing & QA
+- [ ] Unit tests for AI functions
+- [ ] Edge Function integration tests
+- [ ] E2E tests with Playwright (auth + quiz + roadmap flows)
+- [ ] Stripe webhook testing
+
+## Phase 11: DevOps & Deployment
+- [x] GitHub Actions CI pipeline
+- [x] Vercel deployment for frontend
+- [x] Supabase configuration setup
+- [x] Environment secrets management (.env.example)
