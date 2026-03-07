@@ -59,17 +59,29 @@ pub struct TrackProfileShort {
     pub phrase_length_ms: u64,
 }
 
-pub fn build_context(
-    engine_state: &EngineStateSnapshot,
-    playing_track_profile: &TrackProfile,
-    playing_artist: &str,
-    playing_title: &str,
-    available_profiles: &[TrackProfile],
-    intent: &str,
-    target_energy: f64,
-    recent_tracks: &[String],
-    available_metadata: &std::collections::HashMap<String, (String, String)>,
-) -> AiContext {
+/// Input parameters for building AI context.
+pub struct ContextInput<'a> {
+    pub engine_state: &'a EngineStateSnapshot,
+    pub playing_track_profile: &'a TrackProfile,
+    pub playing_artist: &'a str,
+    pub playing_title: &'a str,
+    pub available_profiles: &'a [TrackProfile],
+    pub intent: &'a str,
+    pub target_energy: f64,
+    pub recent_tracks: &'a [String],
+    pub available_metadata: &'a std::collections::HashMap<String, (String, String)>,
+}
+
+pub fn build_context(input: &ContextInput) -> AiContext {
+    let engine_state = input.engine_state;
+    let playing_track_profile = input.playing_track_profile;
+    let playing_artist = input.playing_artist;
+    let playing_title = input.playing_title;
+    let available_profiles = input.available_profiles;
+    let intent = input.intent;
+    let target_energy = input.target_energy;
+    let recent_tracks = input.recent_tracks;
+    let available_metadata = input.available_metadata;
     // Determine playing deck and time remaining
     // For simplicity, we just use the active deck as the one playing
     let deck_a_playing = engine_state.deck_a.state == "playing";

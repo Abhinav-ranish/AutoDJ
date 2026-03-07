@@ -254,7 +254,7 @@ mod tests {
     fn test_seek() {
         let mut deck = Deck::new();
         let buf = make_test_buffer(1000);
-        deck.load_track(buf);
+        deck.load_track("test_track".to_string(), buf);
 
         deck.seek(500);
         assert_eq!(deck.position, 500.0);
@@ -268,7 +268,7 @@ mod tests {
     fn test_loop_playback() {
         let mut deck = Deck::new();
         let buf = make_test_buffer(1000);
-        deck.load_track(buf);
+        deck.load_track("test_track".to_string(), buf);
         deck.play();
 
         // Set a loop from frame 100 to frame 200

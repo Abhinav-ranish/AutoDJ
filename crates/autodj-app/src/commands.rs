@@ -333,19 +333,20 @@ pub async fn analyze_track(track_id: String, state: State<'_, AppState>) -> Resu
             Ok(profile) => {
                 let json = serde_json::to_string(&profile).unwrap_or_default();
                 let db_guard = db.lock().unwrap();
-                let _ = db_guard.save_track_profile(
-                    &track_id,
-                    &json,
-                    profile.tempo.bpm,
-                    profile.tempo.confidence,
-                    profile.perceived_tempo.as_ref().map(|p| p.perceived_tempo).unwrap_or(profile.tempo.bpm),
-                    profile.perceived_tempo.as_ref().map(|p| p.groove_type.as_str()).unwrap_or("standard"),
-                    &profile.key.key,
-                    &profile.key.camelot,
-                    profile.key.confidence,
-                    profile.loudness.integrated_lufs,
-                    profile.energy.average,
-                );
+                let data = autodj_storage::db::ProfileData {
+                    track_id: &track_id,
+                    profile_json: &json,
+                    bpm: profile.tempo.bpm,
+                    bpm_confidence: profile.tempo.confidence,
+                    perceived_tempo: profile.perceived_tempo.as_ref().map(|p| p.perceived_tempo).unwrap_or(profile.tempo.bpm),
+                    groove_type: profile.perceived_tempo.as_ref().map(|p| p.groove_type.as_str()).unwrap_or("standard"),
+                    key_name: &profile.key.key,
+                    camelot: &profile.key.camelot,
+                    key_confidence: profile.key.confidence,
+                    lufs: profile.loudness.integrated_lufs,
+                    energy_avg: profile.energy.average,
+                };
+                let _ = db_guard.save_track_profile(&data);
                 let _ = db_guard.update_status(&track_id, ImportStatus::Analyzed, None);
                 Ok(())
             }
@@ -443,17 +444,17 @@ pub async fn request_next_track(state: State<'_, AppState>) -> Result<AiDecision
     };
     
     // 3. Assemble Context
-    let context = build_context(
-        &snapshot,
-        &playing_profile,
-        "Artist",
-        "Title",
-        &avail_profiles,
-        "maintain", // Default intent
-        0.5,
-        &[],
-        &avail_metadata
-    );
+    let context = build_context(&autodj_ai::context::ContextInput {
+        engine_state: &snapshot,
+        playing_track_profile: &playing_profile,
+        playing_artist: "Artist",
+        playing_title: "Title",
+        available_profiles: &avail_profiles,
+        intent: "maintain",
+        target_energy: 0.5,
+        recent_tracks: &[],
+        available_metadata: &avail_metadata,
+    });
 
     // 4. Await LLM AI Plan
     let planner = state.ai_planner.read().await;

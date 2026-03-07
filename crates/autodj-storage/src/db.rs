@@ -77,6 +77,21 @@ pub struct TrackRecord {
     pub lufs: Option<f64>,
 }
 
+/// Data needed to save a track profile to the database.
+pub struct ProfileData<'a> {
+    pub track_id: &'a str,
+    pub profile_json: &'a str,
+    pub bpm: f64,
+    pub bpm_confidence: f64,
+    pub perceived_tempo: f64,
+    pub groove_type: &'a str,
+    pub key_name: &'a str,
+    pub camelot: &'a str,
+    pub key_confidence: f64,
+    pub lufs: f64,
+    pub energy_avg: f64,
+}
+
 /// The database handle.
 pub struct Database {
     conn: Connection,
@@ -291,20 +306,7 @@ impl Database {
     }
 
     /// Save a track profile to the database.
-    pub fn save_track_profile(
-        &self,
-        track_id: &str,
-        profile_json: &str,
-        bpm: f64,
-        bpm_confidence: f64,
-        perceived_tempo: f64,
-        groove_type: &str,
-        key_name: &str,
-        camelot: &str,
-        key_confidence: f64,
-        lufs: f64,
-        energy_avg: f64,
-    ) -> Result<(), DbError> {
+    pub fn save_track_profile(&self, data: &ProfileData) -> Result<(), DbError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -326,17 +328,17 @@ impl Database {
                 energy_avg=excluded.energy_avg,
                 analyzed_at=excluded.analyzed_at",
             params![
-                track_id,
-                profile_json,
-                bpm,
-                bpm_confidence,
-                perceived_tempo,
-                groove_type,
-                key_name,
-                camelot,
-                key_confidence,
-                lufs,
-                energy_avg,
+                data.track_id,
+                data.profile_json,
+                data.bpm,
+                data.bpm_confidence,
+                data.perceived_tempo,
+                data.groove_type,
+                data.key_name,
+                data.camelot,
+                data.key_confidence,
+                data.lufs,
+                data.energy_avg,
                 now
             ],
         )?;
