@@ -75,6 +75,10 @@ pub struct TrackRecord {
     pub groove_type: Option<String>,
     pub key: Option<String>,
     pub lufs: Option<f64>,
+    // Phase 13: AI classification
+    pub genre: Option<String>,
+    pub mood: Option<String>,
+    pub vibe: Option<String>,
 }
 
 /// Data needed to save a track profile to the database.
@@ -307,7 +311,7 @@ impl Database {
     /// Get all tracks.
     pub fn get_all_tracks(&self) -> Result<Vec<TrackRecord>, DbError> {
         let mut stmt = self.conn.prepare(
-            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.perceived_tempo, p.groove_type, p.key_name, p.lufs
+            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.perceived_tempo, p.groove_type, p.key_name, p.lufs, p.genre, p.mood, p.vibe
              FROM tracks t
              LEFT JOIN track_profiles p ON t.id = p.track_id
              ORDER BY t.created_at DESC",
@@ -328,6 +332,9 @@ impl Database {
                 groove_type: row.get(10)?,
                 key: row.get(11)?,
                 lufs: row.get(12)?,
+                genre: row.get(13)?,
+                mood: row.get(14)?,
+                vibe: row.get(15)?,
             })
         })?;
 
@@ -435,7 +442,7 @@ impl Database {
     /// Get a single track by ID.
     pub fn get_track(&self, track_id: &str) -> Result<Option<TrackRecord>, DbError> {
         let mut stmt = self.conn.prepare(
-            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.perceived_tempo, p.groove_type, p.key_name, p.lufs
+            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.perceived_tempo, p.groove_type, p.key_name, p.lufs, p.genre, p.mood, p.vibe
              FROM tracks t
              LEFT JOIN track_profiles p ON t.id = p.track_id
              WHERE t.id = ?1",
@@ -456,6 +463,9 @@ impl Database {
                 groove_type: row.get(10)?,
                 key: row.get(11)?,
                 lufs: row.get(12)?,
+                genre: row.get(13)?,
+                mood: row.get(14)?,
+                vibe: row.get(15)?,
             })
         })?;
 

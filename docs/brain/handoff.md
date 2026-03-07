@@ -4,17 +4,16 @@
 **AutoDJ** is a high-performance DJ application built with a memory-safe **Rust** audio engine and backend, coupled with a fast **TypeScript/React** frontend via **Tauri v2**. The core audio engine, UI, track analysis pipeline, and AI DJ Conductor are fully implemented and functional through Phase 12.
 
 ## Current Position
-- **Phases 1–12**: Complete
-- **Phase 13–17 (AI Enrichment Overhaul)**: Not started — this is the active roadmap
-- **Next concrete work**: Phase 13 — Gemini Classification
+- **Phases 1–13**: Complete
+- **Phase 14–17 (AI Enrichment Overhaul)**: Active roadmap
+- **Next concrete work**: Phase 14 — AI Decision Engine Overhaul
 
-## Recent Accomplishments (Latest Session — Phase 12)
-- **Spectral Analysis Module** (`spectral.rs`): FFT-based spectral centroid (brightness), spectral flatness (tonality vs noise), and 3-band energy distribution (bass/mid/high) with Hann windowing.
-- **Vocal Detection Module** (`vocal_detection.rs`): Vocal frequency range energy ratio + harmonic prominence scoring, returns 0.0–1.0 vocal presence.
-- **Rhythm Analysis Module** (`rhythm.rs`): Onset-based rhythm complexity and danceability scoring using inter-onset interval statistics and tempo suitability.
-- **Pipeline Integration**: All three new analyzers run in parallel via rayon within the existing analysis pipeline.
-- **DB Schema Expansion**: 12 new columns added to `track_profiles` via migrations.
-- **Energy Trajectory + Structural Markers**: Auto-computed energy trajectory classification, intro/outro length detection from energy curve, first drop timestamp.
+## Recent Accomplishments (Latest Session — Phase 13)
+- **AI Track Classifier** (`classifier.rs`): Gemini-powered classification producing genre, subgenre, mood, vibe, mix_notes, and ai_tags per track from DSP features + metadata.
+- **Classification DB Schema**: 6 new columns on `track_profiles` (genre, subgenre, mood, vibe, mix_notes, ai_tags) + `save_classification()` method.
+- **TrackRecord Expansion**: Library queries now surface genre/mood/vibe fields to the frontend.
+- **Tauri Command**: `classify_track` command wired end-to-end (get profile → build ClassificationInput → call Gemini → save to DB → return result).
+- **Tests**: 53 total passing (3 AI, 15 analysis, 29 core, 6 storage).
 
 ## Core Features Implemented (Phases 1–10)
 - **Low-Latency Audio Engine**: `cpal`-based with `SPSC` lock-free command queues, 3-band EQ, SVF filters, and seamless loops.
@@ -28,7 +27,7 @@
 | Phase | What | Key Files |
 |-------|------|-----------|
 | ~~12~~ | ~~DSP Enrichment~~ | ~~`spectral.rs`, `vocal_detection.rs`, `rhythm.rs`~~ **DONE** |
-| 13 | Gemini Classification — genre/mood/vibe per track via LLM | `classifier.rs` (new) |
+| ~~13~~ | ~~Gemini Classification — genre/mood/vibe per track via LLM~~ | ~~`classifier.rs`~~ **DONE** |
 | 14 | AI Decision Engine — 7-weight scorer, section-aware transitions | `scorer.rs`, `context.rs` (modify) |
 | 15 | Mix History — wire up existing session/history DB tables | `db.rs`, `planner.rs` (modify) |
 | 16 | Audio Export — record live mix to WAV | New recording module |

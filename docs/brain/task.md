@@ -123,11 +123,17 @@ ction — `camelot.rs`
 - [x] Added `first_drop_ms` from existing drop candidates
 - [x] All 52 tests pass, zero clippy warnings
 
-## Phase 13: Gemini Classification
-- [ ] `autodj-ai/src/classifier.rs` — LLM-based genre/mood/vibe classification per track
-- [ ] Add DB columns: genre, subgenre, mood, vibe, mix_notes, ai_tags
-- [ ] Batch classification pipeline for library
-- [ ] Tauri command + UI for viewing/editing AI classifications
+## Phase 13: Gemini Classification ✅
+- [x] `autodj-ai/src/classifier.rs` — `TrackClassification` + `ClassificationInput` structs + `classify_track()` async fn
+- [x] System prompt for genre/subgenre/mood/vibe/mix_notes/ai_tags classification
+- [x] Add 6 DB columns: genre, subgenre, mood, vibe, mix_notes, ai_tags
+- [x] `save_classification()` method on `Database`
+- [x] `TrackRecord` updated with genre/mood/vibe fields surfaced in library queries
+- [x] Tauri `classify_track` command registered + wired to DB persistence
+- [x] Unit tests: deserialization + input serialization
+- [x] All 53 tests pass, zero new warnings
+- [ ] Batch classification pipeline for library (deferred — per-track command available)
+- [ ] UI for viewing/editing AI classifications (deferred to Phase 17)
 
 ## Phase 14: AI Decision Engine Overhaul
 - [ ] Expand scorer weights from 4 to 7 (add genre compatibility, mood continuity, spectral contrast)

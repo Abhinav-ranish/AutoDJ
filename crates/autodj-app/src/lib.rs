@@ -54,6 +54,7 @@ pub fn run() {
             commands::get_hot_cues,
             commands::jump_to_hot_cue,
             commands::clear_library,
+            commands::classify_track,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

@@ -109,13 +109,13 @@ All code quality items resolved in commits `ddfdfa4`–`817eff6`:
 | Phase | Feature | Status |
 |-------|---------|--------|
 | 12 | DSP Enrichment (spectral, vocal, rhythm analysis) | **Complete** |
-| 13 | Gemini Classification (genre/mood/vibe per track) | Not started |
+| 13 | Gemini Classification (genre/mood/vibe per track) | **Complete** |
 | 14 | AI Decision Engine Overhaul (7-weight scorer, section-aware transitions) | Not started |
 | 15 | Mix History & Session Feedback (wire up existing DB tables) | Not started |
 | 16 | Audio Export (WAV recording of live mix) | Not started |
 | 17 | Visual Polish (album art, DP beat tracker, better sections) | Not started |
 
-**Next up**: Phase 13 — see `docs/plans/2026-03-07-ai-enrichment-implementation.md` for details.
+**Next up**: Phase 14 — see `docs/plans/2026-03-07-ai-enrichment-implementation.md` for details.
 
 ### Known gaps carried forward into Phase 13–17:
 - `sections.rs` — still 15% heuristic split (Phase 17 will improve)

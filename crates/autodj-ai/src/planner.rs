@@ -35,6 +35,10 @@ impl AiPlanner {
         Self { config, scorer, llm }
     }
 
+    pub fn config(&self) -> &AiConfig {
+        &self.config
+    }
+
     pub fn set_config(&mut self, config: AiConfig) {
         self.config = config.clone();
         self.scorer = HeuristicScorer::new(config);

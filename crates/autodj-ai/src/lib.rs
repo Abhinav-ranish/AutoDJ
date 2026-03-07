@@ -4,6 +4,7 @@
 //! transition template system, and LLM API integration.
 
 pub mod camelot;
+pub mod classifier;
 pub mod context;
 pub mod llm;
 pub mod planner;
