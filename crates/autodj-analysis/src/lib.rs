@@ -11,7 +11,10 @@ pub mod loudness;
 pub mod perceived_tempo;
 pub mod pipeline;
 pub mod profile;
+pub mod rhythm;
 pub mod sections;
+pub mod spectral;
+pub mod vocal_detection;
 pub mod waveform;
 
 pub use pipeline::analyze_track;

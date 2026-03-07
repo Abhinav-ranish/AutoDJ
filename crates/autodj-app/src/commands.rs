@@ -333,6 +333,7 @@ pub async fn analyze_track(track_id: String, state: State<'_, AppState>) -> Resu
             Ok(profile) => {
                 let json = serde_json::to_string(&profile).unwrap_or_default();
                 let db_guard = db.lock().unwrap();
+                let energy_traj_str = profile.energy_trajectory.clone();
                 let data = autodj_storage::db::ProfileData {
                     track_id: &track_id,
                     profile_json: &json,
@@ -345,6 +346,18 @@ pub async fn analyze_track(track_id: String, state: State<'_, AppState>) -> Resu
                     key_confidence: profile.key.confidence,
                     lufs: profile.loudness.integrated_lufs,
                     energy_avg: profile.energy.average,
+                    spectral_centroid: profile.spectral.as_ref().map(|s| s.centroid),
+                    spectral_flatness: profile.spectral.as_ref().map(|s| s.flatness),
+                    bass_energy: profile.spectral.as_ref().map(|s| s.bass_energy),
+                    mid_energy: profile.spectral.as_ref().map(|s| s.mid_energy),
+                    high_energy: profile.spectral.as_ref().map(|s| s.high_energy),
+                    vocal_presence: profile.vocal_presence,
+                    rhythm_complexity: profile.rhythm.as_ref().map(|r| r.complexity),
+                    danceability: profile.rhythm.as_ref().map(|r| r.danceability),
+                    energy_trajectory: energy_traj_str.as_deref(),
+                    intro_length_ms: profile.intro_length_ms.map(|v| v as i64),
+                    outro_length_ms: profile.outro_length_ms.map(|v| v as i64),
+                    first_drop_ms: profile.first_drop_ms.map(|v| v as i64),
                 };
                 let _ = db_guard.save_track_profile(&data);
                 let _ = db_guard.update_status(&track_id, ImportStatus::Analyzed, None);
@@ -516,6 +529,97 @@ pub fn jump_to_hot_cue(
     } else {
         Err(format!("Hot cue {cue_index} not found for track {track_id}"))
     }
+}
+
+/// Classify a track using Gemini AI (genre, mood, vibe, mix notes).
+#[tauri::command]
+pub async fn classify_track(
+    track_id: String,
+    state: State<'_, AppState>,
+) -> Result<autodj_ai::classifier::TrackClassification, String> {
+    let db = state.db.clone();
+
+    // Get track metadata and profile
+    let (artist, title, id3_genre, profile) = {
+        let db_guard = db.lock().map_err(|e| format!("DB lock: {e}"))?;
+        let track = db_guard
+            .get_track(&track_id)
+            .map_err(|e| format!("DB error: {e}"))?
+            .ok_or_else(|| format!("Track {track_id} not found"))?;
+
+        let profile_json = db_guard
+            .get_track_profile_json(&track_id)
+            .map_err(|e| format!("DB error: {e}"))?
+            .ok_or_else(|| format!("No profile for track {track_id} — analyze first"))?;
+
+        let profile: autodj_analysis::TrackProfile = serde_json::from_str(&profile_json)
+            .map_err(|e| format!("Profile parse error: {e}"))?;
+
+        (
+            track.artist.unwrap_or_else(|| "Unknown".to_string()),
+            track.title.unwrap_or_else(|| "Unknown".to_string()),
+            None::<String>, // ID3 genre not stored separately yet
+            profile,
+        )
+    };
+
+    // Build classification input from profile
+    let input = autodj_ai::classifier::ClassificationInput {
+        artist: &artist,
+        title: &title,
+        id3_genre: id3_genre.as_deref(),
+        bpm: profile.tempo.bpm,
+        perceived_tempo: profile.perceived_tempo.as_ref().map(|p| p.perceived_tempo),
+        groove_type: profile
+            .perceived_tempo
+            .as_ref()
+            .map(|p| p.groove_type.as_str()),
+        key: &profile.key.key,
+        camelot: &profile.key.camelot,
+        energy_avg: profile.energy.average,
+        lufs: profile.loudness.integrated_lufs,
+        spectral_centroid: profile.spectral.as_ref().map(|s| s.centroid),
+        spectral_flatness: profile.spectral.as_ref().map(|s| s.flatness),
+        bass_energy: profile.spectral.as_ref().map(|s| s.bass_energy),
+        mid_energy: profile.spectral.as_ref().map(|s| s.mid_energy),
+        high_energy: profile.spectral.as_ref().map(|s| s.high_energy),
+        vocal_presence: profile.vocal_presence,
+        rhythm_complexity: profile.rhythm.as_ref().map(|r| r.complexity),
+        danceability: profile.rhythm.as_ref().map(|r| r.danceability),
+        energy_trajectory: profile.energy_trajectory.as_deref(),
+        duration_ms: profile.duration_ms,
+        intro_length_ms: profile.intro_length_ms,
+        outro_length_ms: profile.outro_length_ms,
+    };
+
+    // Get AI config
+    let ai_config = {
+        let planner = state.ai_planner.read().await;
+        planner.config().clone()
+    };
+
+    // Call Gemini classifier
+    let classification = autodj_ai::classifier::classify_track(&input, &ai_config)
+        .await
+        .map_err(|e| format!("Classification error: {e}"))?;
+
+    // Save to DB
+    let tags_json =
+        serde_json::to_string(&classification.ai_tags).unwrap_or_else(|_| "[]".to_string());
+    let db_guard = db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db_guard
+        .save_classification(
+            &track_id,
+            &classification.genre,
+            &classification.subgenre,
+            &classification.mood,
+            &classification.vibe,
+            &classification.mix_notes,
+            &tags_json,
+        )
+        .map_err(|e| format!("DB save error: {e}"))?;
+
+    Ok(classification)
 }
 
 /// Clear all tracks from the library and cache.

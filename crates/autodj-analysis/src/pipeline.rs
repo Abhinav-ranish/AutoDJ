@@ -6,8 +6,11 @@ use crate::energy::analyze_energy;
 use crate::key::detect_key;
 use crate::loudness::analyze_loudness;
 use crate::perceived_tempo::analyze_perceived_tempo;
-use crate::profile::TrackProfile;
+use crate::profile::{EnergyInfo, RhythmProfile, SpectralProfile, TrackProfile};
+use crate::rhythm::analyze_rhythm;
 use crate::sections::analyze_sections;
+use crate::spectral::analyze_spectral;
+use crate::vocal_detection::detect_vocal_presence;
 use crate::waveform::analyze_waveform;
 use std::path::Path;
 
@@ -49,6 +52,35 @@ pub fn analyze_track(
     );
 
     let waveform = waveform.map_err(|e| format!("Failed to generate waveform: {e}"))?;
+
+    // Phase 12: Run DSP enrichment analyzers in parallel
+    let (spectral_info, (vocal, rhythm_info)) = rayon::join(
+        || analyze_spectral(samples, sample_rate),
+        || {
+            rayon::join(
+                || detect_vocal_presence(samples, sample_rate),
+                || analyze_rhythm(samples, sample_rate, tempo.bpm),
+            )
+        },
+    );
+
+    let spectral_profile = SpectralProfile {
+        centroid: spectral_info.centroid,
+        flatness: spectral_info.flatness,
+        bass_energy: spectral_info.bass_energy,
+        mid_energy: spectral_info.mid_energy,
+        high_energy: spectral_info.high_energy,
+    };
+
+    let rhythm_profile = RhythmProfile {
+        complexity: rhythm_info.complexity,
+        danceability: rhythm_info.danceability,
+    };
+
+    // Compute energy trajectory and structural markers
+    let energy_trajectory = compute_energy_trajectory(&energy_info.curve);
+    let (intro_length, outro_length) = detect_intro_outro(&energy_info, duration_ms);
+    let first_drop = energy_info.drop_candidates_ms.first().copied();
 
     // Detect Safe Loops and Regions
     let mut safe_loops = Vec::new();
@@ -121,10 +153,81 @@ pub fn analyze_track(
         regions,
         sections,
         waveform,
+        spectral: Some(spectral_profile),
+        vocal_presence: Some(vocal),
+        rhythm: Some(rhythm_profile),
+        energy_trajectory: Some(energy_trajectory),
+        intro_length_ms: intro_length,
+        outro_length_ms: outro_length,
+        first_drop_ms: first_drop,
         duration_ms,
         sample_rate,
         channels,
     })
+}
+
+/// Classify the overall energy trajectory of a track.
+fn compute_energy_trajectory(curve: &[f64]) -> String {
+    if curve.len() < 4 {
+        return "steady".to_string();
+    }
+    let q_len = curve.len() / 4;
+    if q_len == 0 {
+        return "steady".to_string();
+    }
+    let first_quarter: f64 = curve[..q_len].iter().sum::<f64>() / q_len as f64;
+    let last_quarter: f64 = curve[curve.len() - q_len..].iter().sum::<f64>() / q_len as f64;
+    let mid_len = curve.len() / 2;
+    let mid_half: f64 = if mid_len > 0 {
+        curve[q_len..q_len + mid_len].iter().sum::<f64>() / mid_len as f64
+    } else {
+        first_quarter
+    };
+
+    if last_quarter > first_quarter * 1.3 {
+        "building".to_string()
+    } else if first_quarter > last_quarter * 1.3 {
+        "declining".to_string()
+    } else if mid_half > first_quarter * 1.3 && mid_half > last_quarter * 1.3 {
+        "dynamic".to_string()
+    } else {
+        "steady".to_string()
+    }
+}
+
+/// Detect intro and outro lengths based on energy curve.
+fn detect_intro_outro(energy: &EnergyInfo, duration_ms: u64) -> (Option<u64>, Option<u64>) {
+    let curve = &energy.curve;
+    if curve.len() < 4 {
+        return (None, None);
+    }
+
+    let avg = energy.average;
+    let window_ms = (energy.window_seconds * 1000.0) as u64;
+    if window_ms == 0 {
+        return (None, None);
+    }
+
+    // Intro: first stretch of below-average energy
+    let intro_end = curve.iter().position(|&e| e > avg * 0.5).unwrap_or(0);
+    let intro_ms = if intro_end > 0 {
+        Some(intro_end as u64 * window_ms)
+    } else {
+        None
+    };
+
+    // Outro: last stretch of below-average energy
+    let outro_start = curve
+        .iter()
+        .rposition(|&e| e > avg * 0.5)
+        .unwrap_or(curve.len());
+    let outro_ms = if outro_start < curve.len() {
+        Some(duration_ms.saturating_sub(outro_start as u64 * window_ms))
+    } else {
+        None
+    };
+
+    (intro_ms, outro_ms)
 }
 
 #[cfg(test)]

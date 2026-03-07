@@ -18,6 +18,15 @@ pub struct TrackProfile {
     pub sections: Vec<Section>,
     pub waveform: WaveformInfo,
 
+    // Phase 12: DSP enrichment fields
+    pub spectral: Option<SpectralProfile>,
+    pub vocal_presence: Option<f64>,
+    pub rhythm: Option<RhythmProfile>,
+    pub energy_trajectory: Option<String>,
+    pub intro_length_ms: Option<u64>,
+    pub outro_length_ms: Option<u64>,
+    pub first_drop_ms: Option<u64>,
+
     pub duration_ms: u64,
     pub sample_rate: u32,
     pub channels: u16,
@@ -112,6 +121,21 @@ pub struct Section {
     pub start_ms: u64,
     pub end_ms: u64,
     pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpectralProfile {
+    pub centroid: f64,
+    pub flatness: f64,
+    pub bass_energy: f64,
+    pub mid_energy: f64,
+    pub high_energy: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RhythmProfile {
+    pub complexity: f64,
+    pub danceability: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
