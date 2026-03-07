@@ -89,3 +89,16 @@ Here is a recording showing the functional React frontend for Auto-DJ:
   - **Mix Notes**: AI-generated DJ advice for transitions.
   - **AI Tags**: 3-5 descriptive searchable keywords.
 - **Database Integration**: Classification results are persisted to `track_profiles` and surfaced in the library UI and AI context.
+
+## Phase 14: AI Decision Engine Overhaul
+
+- **7-Dimension Scoring**: Expanded the heuristic scorer to include Genre Compatibility, Mood Continuity, and Spectral Contrast (brightness matching).
+- **Semantically Aware Transitions**: The AI now selects transition templates based on vocal presence (e.g., preference for `EchoDrop` when two vocal tracks overlap).
+- **Precision Timing**: Integrated `intro_length_ms`, `outro_length_ms`, and `first_drop_ms` markers into the decision logic for musical phrasing alignment.
+- **Deep Context**: The LLM now receives a complete \"Vibe Map\" of the library and recent play history to avoid repetition.
+
+## Phase 15: Mix History & Session Tracking
+
+- **Session Management**: Automatically tracks DJ sessions with start/end times and multi-track history.
+- **History-Aware Mixing**: Recent plays are stored in SQLite and fed back into the AI to prevent playing the same artist or genre too frequently.
+- **Library Integration**: Surfaced session metadata and play counts in the background to improve future suggestion relevance.

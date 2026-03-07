@@ -135,17 +135,17 @@ ction — `camelot.rs`
 - [ ] Batch classification pipeline for library (deferred — per-track command available)
 - [ ] UI for viewing/editing AI classifications (deferred to Phase 17)
 
-## Phase 14: AI Decision Engine Overhaul
-- [ ] Expand scorer weights from 4 to 7 (add genre compatibility, mood continuity, spectral contrast)
-- [ ] Expand AI context with genre/mood/vibe, spectral profile, section details, mix history, set position
-- [ ] Vocal-aware transition template selection
-- [ ] Section-based transition timing (use intro/outro/drop markers)
+## Phase 14: AI Decision Engine Overhaul ✅
+- [x] Expand scorer weights from 4 to 7 (add genre compatibility, mood continuity, spectral contrast)
+- [x] Expand AI context with genre/mood/vibe, spectral profile, section details, mix history, set position
+- [x] Vocal-aware transition template selection
+- [x] Section-based transition timing (use intro/outro/drop markers)
 
-## Phase 15: Mix History & Session Feedback
-- [ ] Wire up `sessions` and `mix_history` tables (schema already exists)
-- [ ] Auto-create session on first play, record each track transition
-- [ ] Feed recent mix history into AI context for variety scoring
-- [ ] UI: session history panel
+## Phase 15: Mix History & Session Feedback ✅
+- [x] Wire up `sessions` and `mix_history` tables (schema already exists)
+- [x] Auto-create session on first play, record each track transition
+- [x] Feed recent mix history into AI context for variety scoring
+- [x] UI: session history panel
 
 ## Phase 16: Audio Export
 - [ ] Recording tap in audio callback (ring buffer for master output)
