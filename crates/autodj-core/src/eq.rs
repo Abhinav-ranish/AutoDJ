@@ -46,7 +46,7 @@ impl Biquad {
         let w0 = 2.0 * std::f32::consts::PI * cutoff_hz / sample_rate;
         let (sin_w0, cos_w0) = (w0.sin(), w0.cos());
         // Q = 0.707 for Butterworth (Linkwitz-Riley second order)
-        let alpha = sin_w0 / (2.0 * 0.7071);
+        let alpha = sin_w0 / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
 
         let a0 = 1.0 + alpha;
         self.b0 = ((1.0 - cos_w0) / 2.0) / a0;
@@ -60,7 +60,7 @@ impl Biquad {
     fn set_highpass(&mut self, cutoff_hz: f32, sample_rate: f32) {
         let w0 = 2.0 * std::f32::consts::PI * cutoff_hz / sample_rate;
         let (sin_w0, cos_w0) = (w0.sin(), w0.cos());
-        let alpha = sin_w0 / (2.0 * 0.7071);
+        let alpha = sin_w0 / (2.0 * std::f32::consts::FRAC_1_SQRT_2);
 
         let a0 = 1.0 + alpha;
         self.b0 = ((1.0 + cos_w0) / 2.0) / a0;
