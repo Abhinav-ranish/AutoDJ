@@ -56,7 +56,7 @@ mod tests {
         samples[1022] = 0.8; // pixel 1 left peak
         samples[1023] = -0.2; // pixel 1 right peak
 
-        let info = analyze_waveform(&samples, "test_hash", dir.path()).unwrap();
+        let _info = analyze_waveform(&samples, "test_hash", dir.path()).unwrap();
         
         let path = dir.path().join("test_hash_peaks.bin");
         let data = std::fs::read(path).unwrap();

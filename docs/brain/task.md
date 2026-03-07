@@ -147,14 +147,16 @@ ction — `camelot.rs`
 - [x] Feed recent mix history into AI context for variety scoring
 - [x] UI: session history panel
 
-## Phase 16: Audio Export
-- [ ] Recording tap in audio callback (ring buffer for master output)
-- [ ] WAV writer for export
-- [ ] Tauri commands: `start_recording`, `stop_recording`
-- [ ] UI: record button with status indicator
+## Phase 16: Audio Export ✅
+- [x] Recording tap in audio callback (ring buffer for master output)
+- [x] WAV writer for export (32-bit float, stereo, auto-header finalization)
+- [x] Tauri commands: `start_recording`, `stop_recording`
+- [x] UI: record button with blinking dot + elapsed time counter
+- [x] All 61 tests pass, zero warnings
 
-## Phase 17: Visual Polish & Analysis Improvements
-- [ ] Album art extraction on import + cache + UI display
-- [ ] Replace synthetic beat grid with DP beat tracker (Ellis 2007)
-- [ ] Improve section analysis beyond 15% heuristic (energy-curve based)
-- [ ] Library enhancements: genre badges, mood icons, AI tags column
+## Phase 17: Visual Polish & Analysis Improvements ✅
+- [x] Album art extraction on import (lofty) + cache directory + `get_album_art` command
+- [x] Improve section analysis: energy-curve-based detection (intro/buildup/drop/breakdown/outro)
+- [x] Library enhancements: genre badges (purple), mood badges (orange), 9-column grid
+- [ ] Replace synthetic beat grid with DP beat tracker (Ellis 2007) — deferred
+- [ ] Album art display in deck panels — deferred

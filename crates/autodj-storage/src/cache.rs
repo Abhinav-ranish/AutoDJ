@@ -29,6 +29,7 @@ impl CacheManager {
         fs::create_dir_all(mgr.pcm_dir())?;
         fs::create_dir_all(mgr.peaks_dir())?;
         fs::create_dir_all(mgr.originals_dir())?;
+        fs::create_dir_all(mgr.art_dir())?;
         Ok(mgr)
     }
 
@@ -45,6 +46,21 @@ impl CacheManager {
     /// Path to the originals directory.
     pub fn originals_dir(&self) -> PathBuf {
         self.base_dir.join("originals")
+    }
+
+    /// Path to the album art cache directory.
+    pub fn art_dir(&self) -> PathBuf {
+        self.base_dir.join("cache").join("art")
+    }
+
+    /// Get the album art path for a track.
+    pub fn art_path(&self, track_id: &str) -> PathBuf {
+        self.art_dir().join(format!("{track_id}.jpg"))
+    }
+
+    /// Check if album art exists for a track.
+    pub fn art_exists(&self, track_id: &str) -> bool {
+        self.art_path(track_id).exists()
     }
 
     /// Get the PCM cache file path for a track.
@@ -108,9 +124,11 @@ impl CacheManager {
         let _ = fs::remove_dir_all(self.pcm_dir());
         let _ = fs::remove_dir_all(self.peaks_dir());
         let _ = fs::remove_dir_all(self.originals_dir());
+        let _ = fs::remove_dir_all(self.art_dir());
         fs::create_dir_all(self.pcm_dir())?;
         fs::create_dir_all(self.peaks_dir())?;
         fs::create_dir_all(self.originals_dir())?;
+        fs::create_dir_all(self.art_dir())?;
         Ok(())
     }
 }

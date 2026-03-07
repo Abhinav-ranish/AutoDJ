@@ -1,19 +1,36 @@
 # AutoDJ Project Handoff
 
 ## Project State
-**AutoDJ** is a high-performance DJ application built with a memory-safe **Rust** audio engine and backend, coupled with a fast **TypeScript/React** frontend via **Tauri v2**. The core audio engine, UI, track analysis pipeline, and AI DJ Conductor are fully implemented and functional through Phase 12.
+**AutoDJ** is a high-performance DJ application built with a memory-safe **Rust** audio engine and backend, coupled with a fast **TypeScript/React** frontend via **Tauri v2**. The core audio engine, UI, track analysis pipeline, AI DJ Conductor, and all enrichment phases are fully implemented and functional through Phase 17.
 
 ## Current Position
-- **Phases 1–13**: Complete
-- **Phase 14–17 (AI Enrichment Overhaul)**: Active roadmap
-- **Next concrete work**: Phase 14 — AI Decision Engine Overhaul
+- **Phases 1–17**: Complete
+- **AI Enrichment Overhaul (Phases 12–17)**: All done
+- **61 tests passing**, zero warnings
 
-## Recent Accomplishments (Latest Session — Phase 13)
-- **AI Track Classifier** (`classifier.rs`): Gemini-powered classification producing genre, subgenre, mood, vibe, mix_notes, and ai_tags per track from DSP features + metadata.
-- **Classification DB Schema**: 6 new columns on `track_profiles` (genre, subgenre, mood, vibe, mix_notes, ai_tags) + `save_classification()` method.
-- **TrackRecord Expansion**: Library queries now surface genre/mood/vibe fields to the frontend.
-- **Tauri Command**: `classify_track` command wired end-to-end (get profile → build ClassificationInput → call Gemini → save to DB → return result).
-- **Tests**: 53 total passing (3 AI, 15 analysis, 29 core, 6 storage).
+## Recent Accomplishments (Latest Session — Phases 14–17)
+
+### Phase 14: AI Decision Engine Overhaul
+- **7-weight heuristic scorer** (`scorer.rs`): tempo, key, energy, variety, genre, mood, spectral. Added `ScoringCandidate` struct, genre family groups (10 families), mood adjacency wheel.
+- **Enriched AI context** (`context.rs`): genre/mood/vibe, vocal_presence, energy_trajectory, intro/outro/drop timestamps, set flow tracking.
+- **Section-aware transitions**: Uses outro_length_ms for optimal transition timing.
+- **Vocal-aware template selection**: Avoids vocal overlap, uses filter_sweep for genre changes.
+- **Fixed AiConfig model** from "gpt-4o-mini" to "gemini-2.5-flash".
+
+### Phase 15: Mix History & Session Tracking
+- **DB methods**: `get_all_classifications`, `create_session`, `end_session`, `record_track_play`, `get_recent_track_ids`.
+- **Auto-session**: Session created on first `load_track`, track plays recorded automatically.
+- **Mix history**: AI decisions recorded in mix_history for feedback loop.
+
+### Phase 16: Audio Export
+- **WAV Recorder** (`recorder.rs`): Lock-free ring buffer capture from audio callback, writer thread drains to 32-bit float WAV file.
+- **Tauri commands**: `start_recording(filename)`, `stop_recording()`.
+- **UI**: Recording button with blinking red dot + elapsed time counter.
+
+### Phase 17: Visual Polish & Analysis
+- **Album art extraction**: Lofty extracts cover art during import, saved to `~/.autodj/cache/art/`.
+- **Energy-based sections**: Replaced 15% heuristic with energy curve analysis detecting intro/buildup/drop/breakdown/outro.
+- **Library UI**: Genre badges (purple) + mood badges (orange), 9-column grid layout.
 
 ## Core Features Implemented (Phases 1–10)
 - **Low-Latency Audio Engine**: `cpal`-based with `SPSC` lock-free command queues, 3-band EQ, SVF filters, and seamless loops.
@@ -22,26 +39,23 @@
 - **AI Conductor**: Heuristic scorer and Gemini LLM planner (`gemini-2.5-flash`) evaluating the next best track and optimal transition point. Uses perceived tempo over raw BPM for groove-aware mixing.
 - **UI/UX**: Waveform canvas, drag-and-drop import, keyboard shortcuts, hot cues, dynamic pitch range, ID3 metadata display, Gemini API key management.
 
-## What's Next — AI Enrichment Overhaul (Phases 13–17)
+## Architecture
 
-| Phase | What | Key Files |
-|-------|------|-----------|
-| ~~12~~ | ~~DSP Enrichment~~ | ~~`spectral.rs`, `vocal_detection.rs`, `rhythm.rs`~~ **DONE** |
-| ~~13~~ | ~~Gemini Classification — genre/mood/vibe per track via LLM~~ | ~~`classifier.rs`~~ **DONE** |
-| 14 | AI Decision Engine — 7-weight scorer, section-aware transitions | `scorer.rs`, `context.rs` (modify) |
-| 15 | Mix History — wire up existing session/history DB tables | `db.rs`, `planner.rs` (modify) |
-| 16 | Audio Export — record live mix to WAV | New recording module |
-| 17 | Visual Polish — album art, DP beat tracker, better sections | Multiple files |
+| Crate | Purpose |
+|-------|---------|
+| `autodj-core` | Audio engine, decks, mixer, EQ, filters, transport, recorder |
+| `autodj-analysis` | BPM, key, energy, loudness, spectral, vocal, rhythm, sections, waveform |
+| `autodj-ai` | Heuristic scorer, AI planner, LLM client, classifier, Camelot utils |
+| `autodj-storage` | SQLite database, PCM/art cache, file hashing, decoder |
+| `autodj-app` | Tauri commands, app state, main entrypoint |
 
-**Detailed plans**: `docs/plans/2026-03-07-ai-enrichment-design.md` and `docs/plans/2026-03-07-ai-enrichment-implementation.md`
-
-## Known Gaps (Carried Forward)
-- `sections.rs` — 15% heuristic split, not self-similarity matrix (Phase 17)
-- `beats.rs` — synthetic grid only, no DP tracker (Phase 17)
-- `safe_loops` — now populated from energy+beat analysis, could be improved (Phase 17)
-- `request_next_track` — placeholder artist context (Phase 14)
-- `AiConfig::default()` model field still says `"gpt-4o-mini"` (Phase 14)
-- `mix_history` — DB schema exists, no app logic wired (Phase 15)
+## Known Gaps (Future Work)
+- `beats.rs` — synthetic grid only, no DP tracker
+- Album art display in deck panels — extracted but not shown in deck UI
+- Recording limited to one session per app launch
+- Batch classification pipeline (per-track available but no bulk UI)
+- MIDI controller support
+- Key shift / harmonic pitch lock
 
 ## Environment & Build Setup
 - **Requirements**: `rustup`, Node.js, `npm`, `tauri-cli` v2, and `ffmpeg` (for importing audio).
@@ -53,4 +67,4 @@
 - `docs/brain/task.md` — Master task checklist (Phases 1–17)
 - `docs/brain/gaps.md` — Known bugs, gaps, and recommendations
 - `docs/brain/implementation_plan.md` — Historical plan for Phases 5–9
-- `docs/plans/2026-03-07-ai-enrichment-*.md` — Active plan for Phases 12–17
+- `docs/plans/2026-03-07-ai-enrichment-*.md` — Plans for Phases 12–17

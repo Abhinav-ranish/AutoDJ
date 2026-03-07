@@ -27,31 +27,31 @@ pub fn analyze_track(
     let duration_ms = (samples.len() as u64 * 1000) / (sample_rate as u64 * channels as u64);
 
     // Parallelize independent analysis steps using rayon
-    let ((tempo, beat_info), (key, loudness, energy_info, sections, waveform)) = rayon::join(
+    let ((tempo, beat_info), (key, loudness, energy_info, waveform)) = rayon::join(
         || {
             let t = detect_bpm(samples, sample_rate);
             let b = track_beats(samples, sample_rate, t.bpm);
             (t, b)
         },
         || {
-            let (key, (loudness, (energy, (sections, waveform)))) = rayon::join(
+            let (key, (loudness, (energy, waveform))) = rayon::join(
                 || detect_key(samples, sample_rate),
                 || rayon::join(
                     || analyze_loudness(samples, sample_rate),
                     || rayon::join(
                         || analyze_energy(samples, sample_rate, 0.5),
-                        || rayon::join(
-                            || analyze_sections(duration_ms),
-                            || analyze_waveform(samples, &file_hash, peaks_dir)
-                        )
+                        || analyze_waveform(samples, &file_hash, peaks_dir)
                     )
                 )
             );
-            (key, loudness, energy, sections, waveform)
+            (key, loudness, energy, waveform)
         }
     );
 
     let waveform = waveform.map_err(|e| format!("Failed to generate waveform: {e}"))?;
+
+    // Sections depend on energy curve, so compute after energy analysis
+    let sections = analyze_sections(duration_ms, &energy_info.curve);
 
     // Phase 12: Run DSP enrichment analyzers in parallel
     let (spectral_info, (vocal, rhythm_info)) = rayon::join(

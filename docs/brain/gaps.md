@@ -110,20 +110,18 @@ All code quality items resolved in commits `ddfdfa4`–`817eff6`:
 |-------|---------|--------|
 | 12 | DSP Enrichment (spectral, vocal, rhythm analysis) | **Complete** |
 | 13 | Gemini Classification (genre/mood/vibe per track) | **Complete** |
-| 14 | AI Decision Engine Overhaul (7-weight scorer, section-aware transitions) | Not started |
-| 15 | Mix History & Session Feedback (wire up existing DB tables) | Not started |
-| 16 | Audio Export (WAV recording of live mix) | Not started |
-| 17 | Visual Polish (album art, DP beat tracker, better sections) | Not started |
+| 14 | AI Decision Engine Overhaul (7-weight scorer, section-aware transitions) | **Complete** |
+| 15 | Mix History & Session Feedback (wire up existing DB tables) | **Complete** |
+| 16 | Audio Export (WAV recording of live mix) | **Complete** |
+| 17 | Visual Polish (album art, energy-based sections, genre/mood badges) | **Complete** |
 
-**Next up**: Phase 14 — see `docs/plans/2026-03-07-ai-enrichment-implementation.md` for details.
+**All AI Enrichment phases complete.** 61 tests passing, zero warnings.
 
-### Known gaps carried forward into Phase 13–17:
-- `sections.rs` — still 15% heuristic split (Phase 17 will improve)
-- `beats.rs` — synthetic grid only, no DP tracker (Phase 17)
-- `safe_loops` — now populated from energy+beat analysis, but could be improved (Phase 17)
-- `request_next_track` — uses placeholder artist context (Phase 14 will fix)
-- `AiConfig::default()` — model field says `"gpt-4o-mini"` despite Gemini being live (Phase 14)
-- `mix_history` — DB schema exists but zero logic wired (Phase 15)
+### Known gaps remaining:
+- `beats.rs` — synthetic grid only, no DP tracker (future improvement)
+- Album art display in deck panels — extracted and cached but not shown in deck UI
+- Recording limited to one session per app launch (consumer is consumed)
+- Batch classification pipeline (per-track available but no bulk UI)
 
 ---
 
@@ -144,8 +142,8 @@ All code quality items resolved in commits `ddfdfa4`–`817eff6`:
 | Feature | Notes |
 |---------|-------|
 | ~~**Waveform canvas with playhead**~~ | ✅ Implemented |
-| **Album art in library + deck** | Store artwork path in DB during import; display in UI |
-| **Mix recording** | Write master output samples to a growable buffer; export as WAV |
+| ~~**Album art in library + deck**~~ | ✅ Extracted on import, cached; deck display pending |
+| ~~**Mix recording**~~ | ✅ WAV recording with ring buffer tap + writer thread |
 
 ### High Value / High Effort
 | Feature | Notes |
