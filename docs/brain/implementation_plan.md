@@ -1,4 +1,13 @@
-# Auto-DJ — Phases 5, 6, 7 Implementation Plan
+# Auto-DJ — Implementation Plans
+
+> **Status**: Phases 5–9 below are **complete** (historical reference).
+> For the active roadmap (Phases 12–17), see:
+> - `docs/plans/2026-03-07-ai-enrichment-design.md` (high-level design)
+> - `docs/plans/2026-03-07-ai-enrichment-implementation.md` (step-by-step implementation)
+
+---
+
+# Phases 5, 6, 7 Implementation Plan (COMPLETED)
 
 ## Phase 5: Milestone D — Track Analysis
 

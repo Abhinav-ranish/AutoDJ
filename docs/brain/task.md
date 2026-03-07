@@ -97,3 +97,58 @@ ction — `camelot.rs`
 - [x] Integrate into `pipeline.rs` passing raw samples & baseline BPM
 - [x] Update frontend UI state and Types (`TrackRecord`) to show Groove/Perceived Tempo
 - [x] Refactor AI DJ `scorer.rs` and `context.rs` to prioritize perceived tempo over raw BPM
+
+---
+
+## AI Enrichment Overhaul (Phases 11–17)
+
+> Detailed design: `docs/plans/2026-03-07-ai-enrichment-design.md`
+> Detailed implementation: `docs/plans/2026-03-07-ai-enrichment-implementation.md`
+
+## Phase 11: Code Quality Cleanup ✅
+- [x] Use `FRAC_1_SQRT_2` constant in EQ biquad filters
+- [x] Remove unused imports, variables, and constants
+- [x] Resolve all clippy warnings across workspace
+- [x] Extract `ProfileData` and `ContextInput` structs, fix test args
+
+## Phase 12: DSP Enrichment ✅
+- [x] `autodj-analysis/src/spectral.rs` — spectral centroid, flatness, 3-band energy ratio (with Hann windowing)
+- [x] `autodj-analysis/src/vocal_detection.rs` — vocal frequency range energy + harmonic prominence
+- [x] `autodj-analysis/src/rhythm.rs` — onset regularity, complexity, danceability score
+- [x] Add 12 new columns to `track_profiles` table via migration
+- [x] Integrate new analyzers into `pipeline.rs` and `TrackProfile` (parallel via rayon)
+- [x] Update `ProfileData`, `save_track_profile`, and `commands.rs` for new fields
+- [x] Added `energy_trajectory` computation (building/declining/dynamic/steady)
+- [x] Added `intro_length_ms` / `outro_length_ms` detection from energy curve
+- [x] Added `first_drop_ms` from existing drop candidates
+- [x] All 52 tests pass, zero clippy warnings
+
+## Phase 13: Gemini Classification
+- [ ] `autodj-ai/src/classifier.rs` — LLM-based genre/mood/vibe classification per track
+- [ ] Add DB columns: genre, subgenre, mood, vibe, mix_notes, ai_tags
+- [ ] Batch classification pipeline for library
+- [ ] Tauri command + UI for viewing/editing AI classifications
+
+## Phase 14: AI Decision Engine Overhaul
+- [ ] Expand scorer weights from 4 to 7 (add genre compatibility, mood continuity, spectral contrast)
+- [ ] Expand AI context with genre/mood/vibe, spectral profile, section details, mix history, set position
+- [ ] Vocal-aware transition template selection
+- [ ] Section-based transition timing (use intro/outro/drop markers)
+
+## Phase 15: Mix History & Session Feedback
+- [ ] Wire up `sessions` and `mix_history` tables (schema already exists)
+- [ ] Auto-create session on first play, record each track transition
+- [ ] Feed recent mix history into AI context for variety scoring
+- [ ] UI: session history panel
+
+## Phase 16: Audio Export
+- [ ] Recording tap in audio callback (ring buffer for master output)
+- [ ] WAV writer for export
+- [ ] Tauri commands: `start_recording`, `stop_recording`
+- [ ] UI: record button with status indicator
+
+## Phase 17: Visual Polish & Analysis Improvements
+- [ ] Album art extraction on import + cache + UI display
+- [ ] Replace synthetic beat grid with DP beat tracker (Ellis 2007)
+- [ ] Improve section analysis beyond 15% heuristic (energy-curve based)
+- [ ] Library enhancements: genre badges, mood icons, AI tags column

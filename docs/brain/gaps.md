@@ -94,6 +94,39 @@ Many polish items were completed successfully!
 
 ---
 
+## ✅ Phase 11 — Code Quality Cleanup (Completed)
+
+All code quality items resolved in commits `ddfdfa4`–`817eff6`:
+- `FRAC_1_SQRT_2` constant in EQ biquad filters
+- Removed all unused imports, variables, and constants
+- Zero clippy warnings across workspace
+- Extracted `ProfileData` and `ContextInput` structs for cleaner APIs
+
+---
+
+## 🔵 Phases 12–17 — AI Enrichment
+
+| Phase | Feature | Status |
+|-------|---------|--------|
+| 12 | DSP Enrichment (spectral, vocal, rhythm analysis) | **Complete** |
+| 13 | Gemini Classification (genre/mood/vibe per track) | Not started |
+| 14 | AI Decision Engine Overhaul (7-weight scorer, section-aware transitions) | Not started |
+| 15 | Mix History & Session Feedback (wire up existing DB tables) | Not started |
+| 16 | Audio Export (WAV recording of live mix) | Not started |
+| 17 | Visual Polish (album art, DP beat tracker, better sections) | Not started |
+
+**Next up**: Phase 13 — see `docs/plans/2026-03-07-ai-enrichment-implementation.md` for details.
+
+### Known gaps carried forward into Phase 13–17:
+- `sections.rs` — still 15% heuristic split (Phase 17 will improve)
+- `beats.rs` — synthetic grid only, no DP tracker (Phase 17)
+- `safe_loops` — now populated from energy+beat analysis, but could be improved (Phase 17)
+- `request_next_track` — uses placeholder artist context (Phase 14 will fix)
+- `AiConfig::default()` — model field says `"gpt-4o-mini"` despite Gemini being live (Phase 14)
+- `mix_history` — DB schema exists but zero logic wired (Phase 15)
+
+---
+
 ## 💡 Recommendations
 
 ### High Value / Low Effort
