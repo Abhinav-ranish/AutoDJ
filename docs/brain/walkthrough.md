@@ -72,3 +72,20 @@ Here is a recording showing the functional React frontend for Auto-DJ:
 - **AI Integration**: `scorer.rs` uses perceived tempo over raw BPM. `context.rs` sends `perceived_tempo`, `groove_type`, and `lufs_loudness` to Gemini for volume-aware, groove-aware mixing.
 - **Volume Normalization**: LUFS loudness surfaced end-to-end (`TrackRecord → SQL → TS → AI context`). Library shows color-coded **Vol** column (red = loud, yellow = quiet). AI now has per-track loudness for gain equalization during transitions.
 - **Frontend**: Library table includes **Groove** and **Vol** columns. Deck shows groove badge next to BPM.
+## Phase 12: DSP Enrichment & Spectral Mapping
+
+- **Spectral Analysis (`spectral.rs`)**: Implements spectral centroid (brightness), flatness (tonality), and 3-band energy distribution (Bass/Mid/High) using Hann windowing and FFT.
+- **Vocal Presence (`vocal_detection.rs`)**: Detects vocals using energy ratios in the 300Hz-3.5kHz range combined with harmonic prominence analysis.
+- **Rhythm Intelligence (`rhythm.rs`)**: Extracts onset regularity, rhythm complexity, and a danceability score by analyzing inter-onset intervals and tempo suitability.
+- **Structural Markers**: Automated detection of `intro_length_ms`, `outro_length_ms`, and `first_drop_ms` based on energy curve transitions.
+
+## Phase 13: Gemini AI Track Classification
+
+- **AI Classifier (`classifier.rs`)**: Uses Gemini 1.5 Pro (or 2.5 Flash) to analyze the enriched DSP data and metadata to generate high-level semantic labels.
+- **Semantic Tagging**: Automatically classifies tracks by:
+  - **Genre & Subgenre**: Primary/Secondary musical categories.
+  - **Mood**: Emotional character (e.g., Euphoric, Melancholic).
+  - **Vibe**: Role in a set (e.g., peak_time, warm_up).
+  - **Mix Notes**: AI-generated DJ advice for transitions.
+  - **AI Tags**: 3-5 descriptive searchable keywords.
+- **Database Integration**: Classification results are persisted to `track_profiles` and surfaced in the library UI and AI context.
