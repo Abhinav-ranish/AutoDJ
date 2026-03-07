@@ -90,6 +90,19 @@ pub struct ProfileData<'a> {
     pub key_confidence: f64,
     pub lufs: f64,
     pub energy_avg: f64,
+    // Phase 12: DSP enrichment fields
+    pub spectral_centroid: Option<f64>,
+    pub spectral_flatness: Option<f64>,
+    pub bass_energy: Option<f64>,
+    pub mid_energy: Option<f64>,
+    pub high_energy: Option<f64>,
+    pub vocal_presence: Option<f64>,
+    pub rhythm_complexity: Option<f64>,
+    pub danceability: Option<f64>,
+    pub energy_trajectory: Option<&'a str>,
+    pub intro_length_ms: Option<i64>,
+    pub outro_length_ms: Option<i64>,
+    pub first_drop_ms: Option<i64>,
 }
 
 /// The database handle.
@@ -192,6 +205,26 @@ impl Database {
         let migrations = [
             "ALTER TABLE track_profiles ADD COLUMN perceived_tempo REAL",
             "ALTER TABLE track_profiles ADD COLUMN groove_type TEXT",
+            // Phase 12: DSP enrichment columns
+            "ALTER TABLE track_profiles ADD COLUMN spectral_centroid REAL",
+            "ALTER TABLE track_profiles ADD COLUMN spectral_flatness REAL",
+            "ALTER TABLE track_profiles ADD COLUMN bass_energy REAL",
+            "ALTER TABLE track_profiles ADD COLUMN mid_energy REAL",
+            "ALTER TABLE track_profiles ADD COLUMN high_energy REAL",
+            "ALTER TABLE track_profiles ADD COLUMN vocal_presence REAL",
+            "ALTER TABLE track_profiles ADD COLUMN rhythm_complexity REAL",
+            "ALTER TABLE track_profiles ADD COLUMN danceability REAL",
+            "ALTER TABLE track_profiles ADD COLUMN energy_trajectory TEXT",
+            "ALTER TABLE track_profiles ADD COLUMN intro_length_ms INTEGER",
+            "ALTER TABLE track_profiles ADD COLUMN outro_length_ms INTEGER",
+            "ALTER TABLE track_profiles ADD COLUMN first_drop_ms INTEGER",
+            // Phase 13: Gemini classification columns
+            "ALTER TABLE track_profiles ADD COLUMN genre TEXT",
+            "ALTER TABLE track_profiles ADD COLUMN subgenre TEXT",
+            "ALTER TABLE track_profiles ADD COLUMN mood TEXT",
+            "ALTER TABLE track_profiles ADD COLUMN vibe TEXT",
+            "ALTER TABLE track_profiles ADD COLUMN mix_notes TEXT",
+            "ALTER TABLE track_profiles ADD COLUMN ai_tags TEXT",
         ];
         for sql in &migrations {
             // Ignore "duplicate column" errors from re-running migrations
@@ -313,8 +346,8 @@ impl Database {
             .as_secs() as i64;
 
         self.conn.execute(
-            "INSERT INTO track_profiles (track_id, profile_json, bpm, bpm_confidence, perceived_tempo, groove_type, key_name, camelot, key_confidence, lufs, energy_avg, analyzed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "INSERT INTO track_profiles (track_id, profile_json, bpm, bpm_confidence, perceived_tempo, groove_type, key_name, camelot, key_confidence, lufs, energy_avg, spectral_centroid, spectral_flatness, bass_energy, mid_energy, high_energy, vocal_presence, rhythm_complexity, danceability, energy_trajectory, intro_length_ms, outro_length_ms, first_drop_ms, analyzed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
              ON CONFLICT(track_id) DO UPDATE SET
                 profile_json=excluded.profile_json,
                 bpm=excluded.bpm,
@@ -326,6 +359,18 @@ impl Database {
                 key_confidence=excluded.key_confidence,
                 lufs=excluded.lufs,
                 energy_avg=excluded.energy_avg,
+                spectral_centroid=excluded.spectral_centroid,
+                spectral_flatness=excluded.spectral_flatness,
+                bass_energy=excluded.bass_energy,
+                mid_energy=excluded.mid_energy,
+                high_energy=excluded.high_energy,
+                vocal_presence=excluded.vocal_presence,
+                rhythm_complexity=excluded.rhythm_complexity,
+                danceability=excluded.danceability,
+                energy_trajectory=excluded.energy_trajectory,
+                intro_length_ms=excluded.intro_length_ms,
+                outro_length_ms=excluded.outro_length_ms,
+                first_drop_ms=excluded.first_drop_ms,
                 analyzed_at=excluded.analyzed_at",
             params![
                 data.track_id,
@@ -339,8 +384,38 @@ impl Database {
                 data.key_confidence,
                 data.lufs,
                 data.energy_avg,
+                data.spectral_centroid,
+                data.spectral_flatness,
+                data.bass_energy,
+                data.mid_energy,
+                data.high_energy,
+                data.vocal_presence,
+                data.rhythm_complexity,
+                data.danceability,
+                data.energy_trajectory,
+                data.intro_length_ms,
+                data.outro_length_ms,
+                data.first_drop_ms,
                 now
             ],
+        )?;
+        Ok(())
+    }
+
+    /// Save AI classification results for a track.
+    pub fn save_classification(
+        &self,
+        track_id: &str,
+        genre: &str,
+        subgenre: &str,
+        mood: &str,
+        vibe: &str,
+        mix_notes: &str,
+        ai_tags: &str,
+    ) -> Result<(), DbError> {
+        self.conn.execute(
+            "UPDATE track_profiles SET genre=?2, subgenre=?3, mood=?4, vibe=?5, mix_notes=?6, ai_tags=?7 WHERE track_id=?1",
+            params![track_id, genre, subgenre, mood, vibe, mix_notes, ai_tags],
         )?;
         Ok(())
     }
