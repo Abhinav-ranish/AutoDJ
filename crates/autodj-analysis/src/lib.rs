@@ -8,6 +8,7 @@ pub mod bpm;
 pub mod energy;
 pub mod key;
 pub mod loudness;
+pub mod perceived_tempo;
 pub mod pipeline;
 pub mod profile;
 pub mod sections;

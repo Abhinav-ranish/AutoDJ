@@ -339,6 +339,8 @@ pub async fn analyze_track(track_id: String, state: State<'_, AppState>) -> Resu
                     &json,
                     profile.tempo.bpm,
                     profile.tempo.confidence,
+                    profile.perceived_tempo.as_ref().map(|p| p.perceived_tempo).unwrap_or(profile.tempo.bpm),
+                    profile.perceived_tempo.as_ref().map(|p| p.groove_type.as_str()).unwrap_or("standard"),
                     &profile.key.key,
                     &profile.key.camelot,
                     profile.key.confidence,

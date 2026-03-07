@@ -20,8 +20,11 @@ pub struct CurrentStateContext {
     pub artist: String,
     pub title: String,
     pub bpm: f64,
+    pub perceived_tempo: f64,
+    pub groove_type: String,
     pub key: String,
     pub energy: f64,
+    pub lufs_loudness: f64,
     pub elapsed_ms: u64,
     pub time_remaining_ms: u64,
     pub duration_ms: u64,
@@ -47,8 +50,11 @@ pub struct TrackProfileShort {
     pub artist: String,
     pub title: String,
     pub bpm: f64,
+    pub perceived_tempo: f64,
+    pub groove_type: String,
     pub key: String,
     pub energy: f64,
+    pub lufs_loudness: f64,
     pub duration_ms: u64,
     pub phrase_length_ms: u64,
 }
@@ -78,8 +84,15 @@ pub fn build_context(
         artist: playing_artist.to_string(),
         title: playing_title.to_string(),
         bpm: playing_track_profile.tempo.bpm,
+        perceived_tempo: playing_track_profile.perceived_tempo.as_ref()
+            .map(|pt| pt.perceived_tempo)
+            .unwrap_or(playing_track_profile.tempo.bpm),
+        groove_type: playing_track_profile.perceived_tempo.as_ref()
+            .map(|pt| pt.groove_type.clone())
+            .unwrap_or_else(|| "standard".to_string()),
         key: playing_track_profile.key.camelot.clone(),
         energy: playing_track_profile.energy.average,
+        lufs_loudness: playing_track_profile.loudness.integrated_lufs,
         elapsed_ms: deck_snapshot.position_ms,
         time_remaining_ms,
         duration_ms: deck_snapshot.duration_ms,
@@ -110,8 +123,15 @@ pub fn build_context(
                 artist,
                 title,
                 bpm: p.tempo.bpm,
+                perceived_tempo: p.perceived_tempo.as_ref()
+                    .map(|pt| pt.perceived_tempo)
+                    .unwrap_or(p.tempo.bpm),
+                groove_type: p.perceived_tempo.as_ref()
+                    .map(|pt| pt.groove_type.clone())
+                    .unwrap_or_else(|| "standard".to_string()),
                 key: p.key.camelot.clone(),
                 energy: p.energy.average,
+                lufs_loudness: p.loudness.integrated_lufs,
                 duration_ms: p.duration_ms,
                 phrase_length_ms: (60_000.0 / p.tempo.bpm * 16.0) as u64,
             }

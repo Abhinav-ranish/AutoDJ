@@ -5,6 +5,7 @@ use crate::bpm::detect_bpm;
 use crate::energy::analyze_energy;
 use crate::key::detect_key;
 use crate::loudness::analyze_loudness;
+use crate::perceived_tempo::analyze_perceived_tempo;
 use crate::profile::{RegionInfo, TrackProfile};
 use crate::sections::analyze_sections;
 use crate::waveform::analyze_waveform;
@@ -104,12 +105,15 @@ pub fn analyze_track(
         safe_loops,
     };
 
+    let perceived_tempo = analyze_perceived_tempo(samples, sample_rate, &tempo, &beat_info);
+
     Ok(TrackProfile {
         version: 1,
         track_id,
         file_hash,
         analysis_timestamp: now,
         tempo,
+        perceived_tempo: Some(perceived_tempo),
         beats: beat_info,
         key,
         loudness,

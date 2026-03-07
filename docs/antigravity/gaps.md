@@ -77,8 +77,20 @@ Many polish items were completed successfully!
 - **Waveform canvas** — ✅ Rendering using profile energy vectors with playhead overlays
 - **ID3 Parsing** — ✅ Leveraged `lofty` crate during import to extract metadata
 - **Hot Cues** — ✅ Core backend commands (`set_hot_cue`, `jump_to_hot_cue`) and DB schemas mapped
-- **Tempo Control** — ✅ UI sliders for ±8% and fine-tune nudge buttons (`«` / `»`)
-- *Pending*: Mix history, audio export to WAV, drag-and-drop file imports
+- **Tempo Control** — ✅ UI sliders with dynamic pitch range (±6/8/10/16%) and fine-tune nudge buttons (`«` / `»`)
+- **Drag-and-Drop** — ✅ Tauri drop events integrated for file imports
+- **Keyboard Shortcuts** — ✅ Global shortcuts for transport/loops/EQ kills
+- *Pending*: Mix history, audio export to WAV, album art extraction
+
+---
+
+## ✅ Phase 10 — Perceived Tempo Engine (Implemented)
+
+- `autodj-analysis/src/perceived_tempo.rs` — Onset density analysis + groove heuristics
+- `PerceivedTempoInfo` added to `TrackProfile` and SQLite `track_profiles` table
+- AI `scorer.rs` now scores transitions using `perceived_tempo` instead of raw BPM
+- AI `context.rs` sends `perceived_tempo` and `groove_type` to Gemini
+- **Remaining Gap**: Replace basic variance heuristics with ML-based drum pattern classifier
 
 ---
 
@@ -91,9 +103,9 @@ Many polish items were completed successfully!
 | ~~**ID3 tag reading on import**~~ | ✅ Implemented via `lofty` |
 | ~~**Hot cues**~~ | ✅ Implemented DB + Backend Commands |
 | ~~**Beat nudge buttons**~~ | ✅ Implemented UI buttons (`<<` / `>>`) |
-| **Pitch range slider** | ±6 / ±10 / ±16% tempo range selector |
-| **Keyboard shortcuts** | Space = play/pause, Z/X = loop toggle, Q/W = EQ kill |
-| **Drag-and-drop import** | Tauri `drag-drop` event — very low effort, big UX win |
+| ~~**Pitch range slider**~~ | ✅ Implemented |
+| ~~**Keyboard shortcuts**~~ | ✅ Implemented |
+| ~~**Drag-and-drop import**~~ | ✅ Implemented |
 
 ### High Value / Medium Effort
 | Feature | Notes |

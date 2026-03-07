@@ -71,15 +71,16 @@ ction — `camelot.rs`
 - [x] UI: mode switcher, AI status, suggestion panel, config panel
 - [x] Tests: scorer ranking, camelot distance, mock LLM, fallback path
 
-## Phase 8: Milestone G — Polish + Export ✅
+## Phase 8: Milestone G — Polish + Export
 - [x] Read ID3 tags (Title/Artist) on import (`lofty` crate)
 - [x] Auto-sync deck BPM on load
 - [x] Waveform rendering on `<canvas>` with playhead overlay
-- [x] UI: Fine-grain BPM nudge controls and tempo sliders
+- [x] UI: Fine-grain BPM nudge controls, tempo sliders, and dynamic pitch range
 - [x] Backend: Hot cue storage and seek dispatching
+- [x] UI: Keyboard shortcuts (space, z/x, q/w)
 - [x] Clear library functionality
+- [x] Drag-and-drop import implementation
 - [ ] Mix history + session tracking
-- [ ] Drag-and-drop import implementation
 - [ ] Audio export (mix recording)
 
 ## Phase 9: Gemini AI DJ Automation
@@ -89,3 +90,10 @@ ction — `camelot.rs`
 - [x] Expand `context.rs` to compute and attach Timestamp details (duration, beat boundaries) to the track context.
 - [x] Expand `planner.rs` `AiDecision` struct to accept an `execute_at_ms` action timestamp.
 - [x] Update frontend settings panel to reflect Gemini API integration.
+
+## Phase 10: Perceived Tempo Engine ✅
+- [x] Define `PerceivedTempoInfo` in `autodj-analysis/src/profile.rs`
+- [x] Implement `autodj-analysis/src/perceived_tempo.rs` (Onset extraction & Groove Classification)
+- [x] Integrate into `pipeline.rs` passing raw samples & baseline BPM
+- [x] Update frontend UI state and Types (`TrackRecord`) to show Groove/Perceived Tempo
+- [x] Refactor AI DJ `scorer.rs` and `context.rs` to prioritize perceived tempo over raw BPM

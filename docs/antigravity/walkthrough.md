@@ -61,3 +61,14 @@ Here is a recording showing the functional React frontend for Auto-DJ:
 - **Mixer EQ Tuning**: Re-aligned the serialization parameters for `gain_db` linking the front-end inputs properly to `autodj-core` deck 3-band sweeps.
 - **Dynamic Speed Modulation**: Synced the local TS UI `tempo` sliders to dispatch real deck playback speed scalars to the backend (boosting available slider range to ±25%) rather than locking into the Transport Clock. 
 - **Auto Transitions Signature Fix**: Repackaged the `execute_transition` params to respect the new Rust template macros containing nested JSON shapes.
+- **Drag-and-Drop File Import**: Integrated Tauri `tauri://drop` event listener in the frontend, allowing users to drag audio files straight into the UI to auto-trigger the analysis pipeline.
+- **Keyboard Shortcuts Mapping**: Added global Spacebar playback toggle (Deck A), Loop triggering via `Z`/`X`, and instant Low EQ Kills via `Q`/`W`.
+- **Dynamic Pitch Range Selector**: Upgraded the Tempo slider with a dropdown menu to select precision constraints (±6%, ±8%, ±10%, ±16%), dynamically rescaling the `<input type="range">` bounds against the original track's parsed BPM.
+
+## Phase 10: Perceived Tempo Engine
+
+- **New Analyzer** (`autodj-analysis/src/perceived_tempo.rs`): Sub-beat onset density analysis (5ms hop spectral flux) with sparsity ratios and onset variance. Classifies: `four_on_floor`, `trap_half_time`, `dembow` (80–115 BPM), `boom_bap`, `drill`, `jersey_club`, `breakbeat`, `drum_and_bass`.
+- **Schema & Pipeline**: `PerceivedTempoInfo` in `TrackProfile` + SQLite columns with safe ALTER TABLE migrations.
+- **AI Integration**: `scorer.rs` uses perceived tempo over raw BPM. `context.rs` sends `perceived_tempo`, `groove_type`, and `lufs_loudness` to Gemini for volume-aware, groove-aware mixing.
+- **Volume Normalization**: LUFS loudness surfaced end-to-end (`TrackRecord → SQL → TS → AI context`). Library shows color-coded **Vol** column (red = loud, yellow = quiet). AI now has per-track loudness for gain equalization during transitions.
+- **Frontend**: Library table includes **Groove** and **Vol** columns. Deck shows groove badge next to BPM.

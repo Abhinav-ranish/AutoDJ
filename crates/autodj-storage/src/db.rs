@@ -71,7 +71,10 @@ pub struct TrackRecord {
     pub import_status: ImportStatus,
     pub error_message: Option<String>,
     pub bpm: Option<f64>,
+    pub perceived_tempo: Option<f64>,
+    pub groove_type: Option<String>,
     pub key: Option<String>,
+    pub lufs: Option<f64>,
 }
 
 /// The database handle.
@@ -124,6 +127,8 @@ impl Database {
                 profile_json   TEXT NOT NULL,
                 bpm            REAL,
                 bpm_confidence REAL,
+                perceived_tempo REAL,
+                groove_type    TEXT,
                 key_name       TEXT,
                 camelot        TEXT,
                 key_confidence REAL,
@@ -166,6 +171,18 @@ impl Database {
             );
             ",
         )?;
+
+        // Migrations for existing databases: add columns that may not exist yet
+        // SQLite silently ignores ALTER TABLE ADD COLUMN if it fails, so we catch errors
+        let migrations = [
+            "ALTER TABLE track_profiles ADD COLUMN perceived_tempo REAL",
+            "ALTER TABLE track_profiles ADD COLUMN groove_type TEXT",
+        ];
+        for sql in &migrations {
+            // Ignore "duplicate column" errors from re-running migrations
+            let _ = self.conn.execute(sql, []);
+        }
+
         Ok(())
     }
 
@@ -242,7 +259,7 @@ impl Database {
     /// Get all tracks.
     pub fn get_all_tracks(&self) -> Result<Vec<TrackRecord>, DbError> {
         let mut stmt = self.conn.prepare(
-            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.key_name
+            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.perceived_tempo, p.groove_type, p.key_name, p.lufs
              FROM tracks t
              LEFT JOIN track_profiles p ON t.id = p.track_id
              ORDER BY t.created_at DESC",
@@ -259,7 +276,10 @@ impl Database {
                 import_status: row.get(6)?,
                 error_message: row.get(7)?,
                 bpm: row.get(8)?,
-                key: row.get(9)?,
+                perceived_tempo: row.get(9)?,
+                groove_type: row.get(10)?,
+                key: row.get(11)?,
+                lufs: row.get(12)?,
             })
         })?;
 
@@ -277,6 +297,8 @@ impl Database {
         profile_json: &str,
         bpm: f64,
         bpm_confidence: f64,
+        perceived_tempo: f64,
+        groove_type: &str,
         key_name: &str,
         camelot: &str,
         key_confidence: f64,
@@ -289,12 +311,14 @@ impl Database {
             .as_secs() as i64;
 
         self.conn.execute(
-            "INSERT INTO track_profiles (track_id, profile_json, bpm, bpm_confidence, key_name, camelot, key_confidence, lufs, energy_avg, analyzed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "INSERT INTO track_profiles (track_id, profile_json, bpm, bpm_confidence, perceived_tempo, groove_type, key_name, camelot, key_confidence, lufs, energy_avg, analyzed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(track_id) DO UPDATE SET
                 profile_json=excluded.profile_json,
                 bpm=excluded.bpm,
                 bpm_confidence=excluded.bpm_confidence,
+                perceived_tempo=excluded.perceived_tempo,
+                groove_type=excluded.groove_type,
                 key_name=excluded.key_name,
                 camelot=excluded.camelot,
                 key_confidence=excluded.key_confidence,
@@ -306,6 +330,8 @@ impl Database {
                 profile_json,
                 bpm,
                 bpm_confidence,
+                perceived_tempo,
+                groove_type,
                 key_name,
                 camelot,
                 key_confidence,
@@ -332,7 +358,7 @@ impl Database {
     /// Get a single track by ID.
     pub fn get_track(&self, track_id: &str) -> Result<Option<TrackRecord>, DbError> {
         let mut stmt = self.conn.prepare(
-            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.key_name
+            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.perceived_tempo, p.groove_type, p.key_name, p.lufs
              FROM tracks t
              LEFT JOIN track_profiles p ON t.id = p.track_id
              WHERE t.id = ?1",
@@ -349,7 +375,10 @@ impl Database {
                 import_status: row.get(6)?,
                 error_message: row.get(7)?,
                 bpm: row.get(8)?,
-                key: row.get(9)?,
+                perceived_tempo: row.get(9)?,
+                groove_type: row.get(10)?,
+                key: row.get(11)?,
+                lufs: row.get(12)?,
             })
         })?;
 

@@ -11,6 +11,21 @@ function formatTime(ms: number): string {
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function formatGroove(groove: string): string {
+    const labels: Record<string, string> = {
+        four_on_floor: "4/4",
+        trap_half_time: "Trap ½×",
+        dembow: "Dembow",
+        breakbeat: "Breakbeat",
+        boom_bap: "Boom Bap",
+        drill: "Drill",
+        jersey_club: "Jersey",
+        drum_and_bass: "DnB",
+        standard: "Std",
+    };
+    return labels[groove] || groove.replace(/_/g, " ");
+}
+
 // ─── Library View ────────────────────────────────────────────────
 
 function LibraryView() {
@@ -78,7 +93,9 @@ function LibraryView() {
                     <span>Title</span>
                     <span>Artist</span>
                     <span>BPM</span>
+                    <span>Groove</span>
                     <span>Key</span>
+                    <span>Vol</span>
                     <span>Duration</span>
                     <span>Status</span>
                 </div>
@@ -100,9 +117,22 @@ function LibraryView() {
                                 </span>
                                 <span className="track-duration">
                                     {track.bpm ? track.bpm.toFixed(1) : "—"}
+                                    {track.perceived_tempo && track.perceived_tempo !== track.bpm ? (
+                                        <span style={{ fontSize: "10px", color: "var(--accent)", marginLeft: "4px" }}>({track.perceived_tempo.toFixed(0)})</span>
+                                    ) : null}
+                                </span>
+                                <span className="track-duration">
+                                    {track.groove_type && track.groove_type !== "standard" ? (
+                                        <span className="groove-badge">{formatGroove(track.groove_type)}</span>
+                                    ) : "—"}
                                 </span>
                                 <span className="track-duration">
                                     {track.key || "—"}
+                                </span>
+                                <span className="track-duration" style={{
+                                    color: track.lufs ? (track.lufs > -10 ? "var(--status-error)" : track.lufs < -18 ? "var(--status-pending)" : "var(--text-secondary)") : "var(--text-muted)"
+                                }}>
+                                    {track.lufs ? `${track.lufs.toFixed(1)}` : "—"}
                                 </span>
                                 <span className="track-duration">
                                     {track.duration_ms ? formatTime(track.duration_ms) : "—"}
@@ -430,6 +460,8 @@ function DeckPanel({
         setLocalFilter(filterToSlider(snapshot?.filter_cutoff ?? 20000));
     }, [snapshot?.state, snapshot?.gain_db, snapshot?.eq_high, snapshot?.eq_mid, snapshot?.eq_low, snapshot?.filter_cutoff]);
 
+    const [pitchRange, setPitchRange] = useState(0.08);
+
     // Sync localBpm when originBpm changes (new track loaded)
     useEffect(() => {
         setLocalBpm(originalBpm);
@@ -596,7 +628,36 @@ function DeckPanel({
                         <div className="tempo-controls">
                             <div className="tempo-header">
                                 <span className="tempo-label">TEMPO</span>
-                                <span className="tempo-display">{localBpm.toFixed(1)} BPM</span>
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                    <select
+                                        value={pitchRange}
+                                        onChange={(e) => setPitchRange(Number(e.target.value))}
+                                        className="pitch-range-select"
+                                        disabled={isEmpty}
+                                        style={{
+                                            background: "rgba(0,0,0,0.3)",
+                                            color: "var(--text-muted)",
+                                            border: "1px solid var(--border)",
+                                            borderRadius: "4px",
+                                            fontSize: "10px",
+                                            padding: "2px 4px",
+                                            cursor: "pointer"
+                                        }}
+                                    >
+                                        <option value={0.06}>±6%</option>
+                                        <option value={0.08}>±8%</option>
+                                        <option value={0.10}>±10%</option>
+                                        <option value={0.16}>±16%</option>
+                                    </select>
+                                    <span className="tempo-display">{localBpm.toFixed(1)} BPM</span>
+                                    {(() => {
+                                        const track = tracks.find(t => t.id === snapshot?.track_id);
+                                        if (track?.groove_type && track.groove_type !== "standard") {
+                                            return <span className="groove-badge" style={{ marginLeft: "6px", fontSize: "10px" }}>{formatGroove(track.groove_type)}</span>;
+                                        }
+                                        return null;
+                                    })()}
+                                </div>
                             </div>
                             <div className="tempo-row">
                                 {/* Fine nudge left */}
@@ -604,7 +665,7 @@ function DeckPanel({
                                     className="tempo-btn"
                                     title="Nudge −2 BPM"
                                     onClick={() => {
-                                        const next = Math.max(originalBpm * 0.75, localBpm - 2);
+                                        const next = Math.max(originalBpm * (1 - pitchRange), localBpm - 2);
                                         setLocalBpm(next);
                                         setDeckSpeed(deckId, next / originalBpm);
                                     }}
@@ -613,12 +674,12 @@ function DeckPanel({
                                     «
                                 </button>
 
-                                {/* Tempo slider ±25% */}
+                                {/* Tempo slider ±X% */}
                                 <input
                                     type="range"
                                     className="tempo-slider"
-                                    min={originalBpm * 0.75}
-                                    max={originalBpm * 1.25}
+                                    min={originalBpm * (1 - pitchRange)}
+                                    max={originalBpm * (1 + pitchRange)}
                                     step={0.1}
                                     value={localBpm}
                                     disabled={isEmpty}
@@ -634,7 +695,7 @@ function DeckPanel({
                                     className="tempo-btn"
                                     title="Nudge +2 BPM"
                                     onClick={() => {
-                                        const next = Math.min(originalBpm * 1.25, localBpm + 2);
+                                        const next = Math.min(originalBpm * (1 + pitchRange), localBpm + 2);
                                         setLocalBpm(next);
                                         setDeckSpeed(deckId, next / originalBpm);
                                     }}
@@ -815,6 +876,48 @@ function AiPanel() {
     const suggestedTrack = aiDecision?.track_selection
         ? tracks.find(t => t.id === aiDecision.track_selection)
         : null;
+
+    // ─── AutoDJ Polling Loop ─────────────────────────────────────
+    // When mode = "autodj", poll for AI decisions every 10 seconds.
+    // Auto-load suggested track onto the idle deck when AI says "transition_now".
+    useEffect(() => {
+        if (mode !== "autodj") return;
+
+        // Immediately request first decision
+        requestNextTrack();
+
+        const interval = setInterval(() => {
+            const state = useStore.getState();
+            // Don't spam if already thinking
+            if (state.isThinking) return;
+            // Don't re-request if we already have a pending transition_now
+            if (state.aiDecision?.decision === "transition_now") return;
+            state.requestNextTrack();
+        }, 10_000); // 10s polling interval
+
+        return () => clearInterval(interval);
+    }, [mode]);
+
+    // Auto-load the suggested track onto the idle deck
+    useEffect(() => {
+        if (mode !== "autodj") return;
+        if (!aiDecision || aiDecision.decision !== "transition_now") return;
+        if (!aiDecision.track_selection) return;
+
+        const deckA = engineState?.deck_a;
+        const deckB = engineState?.deck_b;
+
+        // Find the idle deck (not playing, or empty)
+        let targetDeck: "a" | "b" = "b"; // default to B
+        if (deckA?.state === "playing" && deckB?.state !== "playing") {
+            targetDeck = "b";
+        } else if (deckB?.state === "playing" && deckA?.state !== "playing") {
+            targetDeck = "a";
+        }
+
+        // Load the suggested track onto the idle deck
+        loadTrack(targetDeck, aiDecision.track_selection);
+    }, [mode, aiDecision?.decision, aiDecision?.track_selection]);
 
     // Map raw AI action to human-readable status
     const getStatusText = () => {
@@ -1169,8 +1272,71 @@ export default function App() {
         const unlisten = listen<EngineState>("engine-state", (event) => {
             setEngineState(event.payload);
         });
+
+        // ── Drag & Drop Listener ──
+        const unlistenDrop = listen<any>("tauri://drop", (event) => {
+            const paths = event.payload?.paths || (Array.isArray(event.payload) ? event.payload : undefined);
+            if (paths && paths.length > 0) {
+                useStore.getState().importFiles(paths);
+            }
+        });
+
+        // ── Keyboard Shortcuts Listener ──
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Ignore if user is typing in an input
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+                return;
+            }
+
+            const state = useStore.getState();
+            if (!state.engineState) return;
+
+            const isDeckAPlaying = state.engineState.deck_a.state === "playing";
+            const isDeckBPlaying = state.engineState.deck_b.state === "playing";
+
+            if (e.code === "Space") {
+                e.preventDefault();
+                // Play/pause Deck A logic:
+                if (isDeckAPlaying) {
+                    state.pause("a");
+                } else {
+                    state.play("a");
+                }
+            }
+            else if (e.code === "KeyZ") {
+                e.preventDefault();
+                if (state.engineState.deck_a.loop_active) {
+                    state.clearLoop("a");
+                } else {
+                    state.setLoop("a", 4);
+                }
+            }
+            else if (e.code === "KeyX") {
+                e.preventDefault();
+                if (state.engineState.deck_b.loop_active) {
+                    state.clearLoop("b");
+                } else {
+                    state.setLoop("b", 4);
+                }
+            }
+            else if (e.code === "KeyQ") {
+                e.preventDefault();
+                const currentLowA = state.engineState.deck_a.eq_low;
+                state.setEq("a", "low", currentLowA <= -90 ? 0 : -96);
+            }
+            else if (e.code === "KeyW") {
+                e.preventDefault();
+                const currentLowB = state.engineState.deck_b.eq_low;
+                state.setEq("b", "low", currentLowB <= -90 ? 0 : -96);
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+
         return () => {
             unlisten.then(f => f());
+            unlistenDrop.then(f => f());
+            window.removeEventListener("keydown", handleKeyDown);
         };
     }, [setEngineState]);
 

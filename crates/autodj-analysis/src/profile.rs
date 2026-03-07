@@ -9,6 +9,7 @@ pub struct TrackProfile {
     pub analysis_timestamp: String,
 
     pub tempo: TempoInfo,
+    pub perceived_tempo: Option<PerceivedTempoInfo>,
     pub beats: BeatInfo,
     pub key: KeyInfo,
     pub loudness: LoudnessInfo,
@@ -28,6 +29,14 @@ pub struct TempoInfo {
     pub confidence: f64,
     pub candidates: Vec<TempoCandidate>,
     pub variable_tempo: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PerceivedTempoInfo {
+    pub bpm: f64,
+    pub perceived_tempo: f64,
+    pub groove_type: String,
+    pub tempo_confidence: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

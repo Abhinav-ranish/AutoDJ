@@ -45,7 +45,15 @@ impl HeuristicScorer {
         recent_tracks: &[String],
         intent: &str,
     ) -> f64 {
-        let score_bpm = self.score_tempo(current.tempo.bpm, candidate.tempo.bpm);
+        // Prefer perceived tempo over raw BPM for groove-aware matching
+        let current_tempo = current.perceived_tempo.as_ref()
+            .map(|pt| pt.perceived_tempo)
+            .unwrap_or(current.tempo.bpm);
+        let candidate_tempo = candidate.perceived_tempo.as_ref()
+            .map(|pt| pt.perceived_tempo)
+            .unwrap_or(candidate.tempo.bpm);
+
+        let score_bpm = self.score_tempo(current_tempo, candidate_tempo);
         let score_key = self.score_key(&current.key.camelot, &candidate.key.camelot);
         let score_energy = self.score_energy(current.energy.average, candidate.energy.average, intent);
         let score_variety = self.score_variety(&candidate.track_id, recent_tracks);

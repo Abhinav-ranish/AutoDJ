@@ -11,7 +11,10 @@ export interface TrackRecord {
     import_status: string;
     error_message: string | null;
     bpm: number | null;
+    perceived_tempo: number | null;
+    groove_type: string | null;
     key: string | null;
+    lufs: number | null;
 }
 
 export interface DeckSnapshot {
