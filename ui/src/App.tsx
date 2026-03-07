@@ -406,18 +406,10 @@ function DeckPanel({
     }, [snapshot?.loop_active, snapshot?.loop_start_ms, snapshot?.loop_end_ms, masterBpm]);
 
     const getOriginalBpm = (snap: any) => {
-        if (!snap || snap.state === "empty") return masterBpm;
-        const snapDur = snap.duration_ms;
-        if (snapDur > 0) {
-            let best: typeof tracks[0] | null = null;
-            let bestDiff = Infinity;
-            for (const t of tracks) {
-                if (t.duration_ms != null) {
-                    const diff = Math.abs(t.duration_ms - snapDur);
-                    if (diff < bestDiff && diff < 500) { bestDiff = diff; best = t; }
-                }
-            }
-            if (best?.bpm) return best.bpm;
+        if (!snap || snap.state === "empty" || !snap.track_id) return masterBpm;
+        const track = tracks.find(t => t.id === snap.track_id);
+        if (track && track.bpm) {
+            return track.bpm;
         }
         return masterBpm;
     };
@@ -478,6 +470,11 @@ function DeckPanel({
                     <div className="deck-info">
                         <span className="deck-track-title">
                             {isEmpty ? "Empty" : isPlaying ? "▶ Playing" : "⏸ Paused"}
+                        </span>
+                        <span className="deck-track-title">
+                            {snapshot?.track_id
+                                ? tracks.find(t => t.id === snapshot.track_id)?.title ?? "Unknown Track"
+                                : "No track loaded"}
                         </span>
                         <span className="deck-time">
                             {formatTime(snapshot?.position_ms ?? 0)} /{" "}
@@ -847,12 +844,11 @@ function AiPanel() {
     };
 
     const activeDeck = engineState?.deck_a?.state === "playing" ? "A" : "B";
-    const currentTrackName = (activeDeck === "A" ?
-        tracks.find(t => t.duration_ms === engineState?.deck_a?.duration_ms)?.title :
-        tracks.find(t => t.duration_ms === engineState?.deck_b?.duration_ms)?.title) || "Nothing playing";
+    const currentTrackId = activeDeck === "A" ? engineState?.deck_a?.track_id : engineState?.deck_b?.track_id;
+    const currentTrack = tracks.find(t => t.id === currentTrackId);
 
-    const currentBpm = activeDeck === "A" ? engineState?.deck_a?.gain_db : engineState?.deck_b?.gain_db; // Oops, BPM is in master_bpm or per-deck logic elsewhere. Let's use master_bpm for now or track logic.
-    const displayBpm = engineState?.master_bpm?.toFixed(1) || "128.0";
+    const currentTrackName = currentTrack?.title || "Nothing playing";
+    const displayBpm = currentTrack?.bpm?.toFixed(1) || engineState?.master_bpm?.toFixed(1) || "128.0";
 
     return (
         <div className="ai-panel ai-panel-card" style={{ flex: 1 }}>
@@ -1074,12 +1070,102 @@ function TransitionsPanel() {
     );
 }
 
+// ─── AI Config Panel ─────────────────────────────────────────────
+
+function AiConfigPanel() {
+    const aiConfig = useStore((state) => state.aiConfig);
+    const setAiConfig = useStore((state) => state.setAiConfig);
+    const [apiKey, setApiKey] = useState("");
+    const [isSaving, setIsSaving] = useState(false);
+
+
+
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            await setAiConfig({
+                ...aiConfig,
+                enabled: true,
+                api_key: apiKey,
+                model: "gemini-1.5-pro",
+                endpoint_url: "https://generativelanguage.googleapis.com/v1beta/models"
+            });
+            setApiKey(""); // Clear so it shows the masked view
+        } catch (err) {
+            console.error("Failed to save AI config:", err);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    return (
+        <div className="ai-panel ai-panel-card" style={{ flex: 1, minWidth: "300px" }}>
+            <h3 style={{ margin: "0 0 15px 0", fontSize: "14px", textTransform: "uppercase", letterSpacing: "1px", color: "var(--text-secondary)", fontFamily: "var(--font-display)" }}>
+                ⚙️ Gemini AI Integration
+            </h3>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                    <label style={{ fontSize: "12px", color: "#888" }}>GEMINI API KEY</label>
+                    {aiConfig?.api_key && apiKey === "" ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border)" }}>
+                            <span style={{ fontFamily: "monospace", color: "var(--status-ready)", flex: 1, fontSize: "14px" }}>
+                                ✓ {aiConfig.api_key.substring(0, 4)}....{aiConfig.api_key.slice(-4)}X
+                            </span>
+                            <button onClick={() => setApiKey(aiConfig.api_key)} style={{ background: "transparent", border: "1px solid #555", color: "#ccc", borderRadius: "4px", cursor: "pointer", padding: "4px 8px", fontSize: "10px", fontWeight: "bold", transition: "all 0.2s ease" }}>
+                                EDIT
+                            </button>
+                        </div>
+                    ) : (
+                        <input
+                            type="password"
+                            placeholder="AIzeSy..."
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            style={{
+                                padding: "10px",
+                                background: "rgba(0,0,0,0.2)",
+                                border: "1px solid var(--border)",
+                                borderRadius: "6px",
+                                color: "var(--text)",
+                                fontFamily: "monospace"
+                            }}
+                        />
+                    )}
+                </div>
+
+                <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    style={{
+                        padding: "10px",
+                        background: apiKey ? "var(--primary-glow)" : "var(--surface)",
+                        color: apiKey ? "#fff" : "var(--text-muted)",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        cursor: isSaving || !apiKey ? "not-allowed" : "pointer",
+                        transition: "all 0.2s ease",
+                        marginTop: "8px"
+                    }}
+                >
+                    {isSaving ? "Saving..." : "Save AI Credentials"}
+                </button>
+            </div>
+        </div>
+    );
+}
+
 // ─── App ─────────────────────────────────────────────────────────
 
 export default function App() {
     const { activeView, setActiveView, setEngineState } = useStore();
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
     useEffect(() => {
+        // Load initial state elements
+        useStore.getState().initStore();
+
         const unlisten = listen<EngineState>("engine-state", (event) => {
             setEngineState(event.payload);
         });
@@ -1109,11 +1195,25 @@ export default function App() {
                         DJ
                     </button>
                 </nav>
+                <div className="header-info">
+                    <button className="settings-btn" onClick={() => setIsSettingsOpen(true)}>
+                        ⚙️
+                    </button>
+                </div>
             </header>
 
             <main className="main-content">
                 {activeView === "library" ? <LibraryView /> : <DJView />}
             </main>
+
+            {isSettingsOpen && (
+                <div className="settings-modal-overlay" onClick={() => setIsSettingsOpen(false)}>
+                    <div className="settings-modal" onClick={e => e.stopPropagation()}>
+                        <button className="settings-modal-close" onClick={() => setIsSettingsOpen(false)}>✕</button>
+                        <AiConfigPanel />
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

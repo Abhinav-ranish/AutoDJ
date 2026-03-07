@@ -22,7 +22,10 @@ pub struct CurrentStateContext {
     pub bpm: f64,
     pub key: String,
     pub energy: f64,
+    pub elapsed_ms: u64,
     pub time_remaining_ms: u64,
+    pub duration_ms: u64,
+    pub phrase_length_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +49,8 @@ pub struct TrackProfileShort {
     pub bpm: f64,
     pub key: String,
     pub energy: f64,
+    pub duration_ms: u64,
+    pub phrase_length_ms: u64,
 }
 
 pub fn build_context(
@@ -75,7 +80,10 @@ pub fn build_context(
         bpm: playing_track_profile.tempo.bpm,
         key: playing_track_profile.key.camelot.clone(),
         energy: playing_track_profile.energy.average,
+        elapsed_ms: deck_snapshot.position_ms,
         time_remaining_ms,
+        duration_ms: deck_snapshot.duration_ms,
+        phrase_length_ms: (60_000.0 / playing_track_profile.tempo.bpm * 16.0) as u64,
     };
 
     let preferences = PreferencesContext {
@@ -104,6 +112,8 @@ pub fn build_context(
                 bpm: p.tempo.bpm,
                 key: p.key.camelot.clone(),
                 energy: p.energy.average,
+                duration_ms: p.duration_ms,
+                phrase_length_ms: (60_000.0 / p.tempo.bpm * 16.0) as u64,
             }
         })
         .collect();

@@ -12,6 +12,7 @@ use tauri::Emitter;
 /// # Errors
 /// Returns an error if the app fails to initialize.
 pub fn run() {
+    dotenvy::dotenv().ok();
     env_logger::init();
 
     let app_state = match AppState::new() {

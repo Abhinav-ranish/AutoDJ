@@ -16,6 +16,8 @@
 | B5 | `autodj-app/src/commands.rs:seek` | Hardcoded `bpm = 128.0` for ms → beat conversion | **(FIXED)** |
 | B6 | `autodj-app/src/commands.rs:set_loop` | `start_beat = 0` always — loop always starts from track beginning | **(FIXED)** |
 | B7 | `autodj-core/src/engine.rs:SyncToMaster` | Command is a no-op (`let _ = deck;`) | **(FIXED via interpolation + SetSpeed)** |
+| B8 | `ui/src/App.tsx` | Deck BPM incorrectly guesses track metadata based on duration | **(FIXED via `track_id` prop passing through `DeckSnapshot`)** |
+| B9 | `ui/src/App.tsx` | Gemini API key input isn't properly masked and state isn't remembered on reload | **(FIXED via `localStorage` init + UI refactor)** |
 
 ## ✅ Low / Code Quality Issues (Implemented)
 
@@ -59,13 +61,13 @@ Transitions are largely implemented over the recent commits.
 The AI engine and corresponding UI are fully plumbed in!
 - `autodj-ai/src/camelot.rs` — Camelot wheel distance function
 - `autodj-ai/src/scorer.rs` — `HeuristicScorer` (tempo/key/energy/variety weights)
-- `autodj-ai/src/context.rs` — `AiContext` builder
-- `autodj-ai/src/llm.rs` — `LlmClient` (with response parsing logic)
-- `autodj-ai/src/planner.rs` — `AiPlanner` delegating to LLM or Scorer
+- `autodj-ai/src/context.rs` — `AiContext` builder with millisecond precision
+- `autodj-ai/src/llm.rs` — `LlmClient` targeting Gemini `generateContent`
+- `autodj-ai/src/planner.rs` — `AiPlanner` delegating to LLM or Scorer, parsing `execute_at_ms` json boundaries
 - `AppState`: tracks `AiPlanner` + `DjMode`
 - Tauri commands: `request_next_track`, `set_mode`, `set_ai_config`
-- UI: Mode switcher (Manual/Assisted/AutoDJ), AI status panel, track suggestions
-- **Remaining Gap**: Testing the LLM edge cases, rate limits, and scoring heuristics.
+- UI: Mode switcher (Manual/Assisted/AutoDJ), AI status panel, track suggestions, and settings modal
+- Infrastructure: Added `dotenvy` for native `.env` variable ingestion (`GEMINI_API_KEY`)
 
 ---
 

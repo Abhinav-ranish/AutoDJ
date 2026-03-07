@@ -125,7 +125,7 @@ pub async fn load_track(
     let track_buffer = TrackBuffer::open(&pcm_path)
         .map_err(|e| format!("Failed to open track buffer: {e}"))?;
 
-    state.load_track_to_deck(deck_id, Arc::new(track_buffer));
+    state.load_track_to_deck(deck_id, track_id.clone(), Arc::new(track_buffer));
 
     // Auto-sync BPM if profile exists
     if let Some(snap) = state.latest_state() {

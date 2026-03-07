@@ -45,6 +45,7 @@ pub struct EngineStateSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeckSnapshot {
     pub state: String,
+    pub track_id: Option<String>,
     pub position_ms: u64,
     pub duration_ms: u64,
     pub position_fraction: f64,
@@ -84,6 +85,7 @@ impl DeckSnapshot {
 
         Self {
             state: state.to_string(),
+            track_id: deck.track_id.clone(),
             position_ms: deck.position_ms(sample_rate),
             duration_ms,
             position_fraction: deck.position_fraction(),
@@ -227,10 +229,10 @@ impl AudioEngine {
                 &config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     // Check for pending track loads (non-blocking)
-                    while let Some((deck_id, track_buf)) = track_loader.try_recv() {
+                    while let Some((deck_id, track_id, track_buf)) = track_loader.try_recv() {
                         match deck_id {
-                            DeckId::A => deck_a.load_track(track_buf),
-                            DeckId::B => deck_b.load_track(track_buf),
+                            DeckId::A => deck_a.load_track(track_id, track_buf),
+                            DeckId::B => deck_b.load_track(track_id, track_buf),
                         }
                     }
 
@@ -420,23 +422,23 @@ impl AudioEngine {
 
 /// Load a track into the engine from outside the audio callback.
 pub struct TrackLoader {
-    producer: ringbuf::HeapProd<(DeckId, Arc<TrackBuffer>)>,
+    producer: ringbuf::HeapProd<(DeckId, String, Arc<TrackBuffer>)>,
 }
 
 /// Consumer side for the audio callback to receive track loads.
 pub struct TrackLoadReceiver {
-    consumer: ringbuf::HeapCons<(DeckId, Arc<TrackBuffer>)>,
+    consumer: ringbuf::HeapCons<(DeckId, String, Arc<TrackBuffer>)>,
 }
 
 impl TrackLoadReceiver {
-    pub fn try_recv(&mut self) -> Option<(DeckId, Arc<TrackBuffer>)> {
+    pub fn try_recv(&mut self) -> Option<(DeckId, String, Arc<TrackBuffer>)> {
         self.consumer.try_pop()
     }
 }
 
 /// Create a track loader pair (sender + receiver).
 pub fn create_track_loader() -> (TrackLoader, TrackLoadReceiver) {
-    let ring = HeapRb::<(DeckId, Arc<TrackBuffer>)>::new(4);
+    let ring = HeapRb::<(DeckId, String, Arc<TrackBuffer>)>::new(4);
     let (prod, cons) = ring.split();
     (
         TrackLoader { producer: prod },
@@ -445,7 +447,7 @@ pub fn create_track_loader() -> (TrackLoader, TrackLoadReceiver) {
 }
 
 impl TrackLoader {
-    pub fn load(&mut self, deck: DeckId, track: Arc<TrackBuffer>) -> bool {
-        self.producer.try_push((deck, track)).is_ok()
+    pub fn load(&mut self, deck: DeckId, track_id: String, track: Arc<TrackBuffer>) -> bool {
+        self.producer.try_push((deck, track_id, track)).is_ok()
     }
 }

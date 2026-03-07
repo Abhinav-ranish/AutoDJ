@@ -29,7 +29,18 @@ d3560fa Initial commit
 ## Phase 5: Track Analysis Implementation Highlights
 
 - **`autodj-analysis` Crate**: Implemented a comprehensive audio analysis pipeline capable of extracting BPM, beat grids, keys (Camelot mapped), perceived loudness (LUFS), dynamic energy levels, segment markers, and renderable waveform peaks.
-- **Background Orchestration**: Hooked the analysis functionality directly into the SQLite database and the Tauri React UI, processing everything concurrently off the main thread.
+- **Background Orchestration**: Hooked the analysis functionality directly into the SQLite database- Fixed the dynamic `.track-list-header` CSS mis-scaling by matching grid constraints to the underlying `auto` layout.
+
+---
+
+## Phase 9: Gemini AI DJ Automation Execution
+- **LLM Payload Migration:** The `LlmClient::query` payload was entirely rewritten to format interactions using Google's `generateContent` endpoints over the previous `chat/completions` API structure, allowing the use of `gemini-1.5-pro`.
+- **JSON Schema Strictness:** Bound the `generationConfig` headers to enforce `application/json` output, extracting valid AI decisions recursively through `body.candidates[0].content.parts[0].text`.
+  - **BPM & Track Title Fix**: Rewrote the Deck track loading state to pass the exact `track_id` string from the backend `LlmClient` to `engine.rs` SPSC channels and expose it in `DeckSnapshot` instead of inferring loaded tracks via duration lengths, resolving a critical issue where deck BPM displays reported the wrong track tempo.
+  - **Gemini Key Persistence & Masking**: The AI Settings panel now caches the user's Google API Key within `localStorage` and recovers it automatically upon UI startup. The text entry automatically collapses to a visually secure `✓ AIz....123X` mask upon saving. Additionally, `autodj-core` was patched with `dotenvy`, naturally adopting `.env`-defined `GEMINI_API_KEY` environmental configurations out of the box.
+- **Temporal Context Extraction:** Overhauled the `AiContext` structure sent with prompts. The engine now ships exact metadata timestamps including elapsed duration, track bounds, and explicitly calculated `phrase_length_ms` (16-bar markers).
+- **Exact Action Timing:** The output `AiDecision` interface allows the `execute_at_ms` response field to dictate *exactly* what millisecond a queued transition must fire, moving beyond blind `transition_now` decisions.
+- **Frontend Configuration Update:** A new `AiConfigPanel` modal has been embedded into the main `App.tsx` DJ View screen, allowing the user to paste their Google Gemini API directly into the global app store context.
 
 ## Phase 6 & 7: Transitions and AI Conductor Implementation Highlights
 

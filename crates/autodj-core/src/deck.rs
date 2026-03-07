@@ -20,6 +20,9 @@ pub struct Deck {
     /// Currently loaded track buffer (shared ownership for thread safety).
     pub track: Option<Arc<TrackBuffer>>,
 
+    /// ID of the currently loaded track.
+    pub track_id: Option<String>,
+
     /// Playback position in frames (stereo frame index).
     pub position: f64,
 
@@ -50,6 +53,7 @@ impl Deck {
     pub fn with_sample_rate(sample_rate: f32) -> Self {
         Self {
             track: None,
+            track_id: None,
             position: 0.0,
             state: TransportState::Empty,
             gain: 1.0,
@@ -67,11 +71,12 @@ impl Deck {
     }
 
     /// Load a track buffer into the deck.
-    pub fn load_track(&mut self, track: Arc<TrackBuffer>) {
+    pub fn load_track(&mut self, track_id: String, track: Arc<TrackBuffer>) {
         self.position = 0.0;
         self.state = TransportState::Paused;
         self.loop_start = None;
         self.loop_end = None;
+        self.track_id = Some(track_id);
         self.track = Some(track);
     }
 

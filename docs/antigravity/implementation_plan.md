@@ -245,3 +245,29 @@ cargo test --workspace
 | 5 | D — Analysis | 7 new modules in `autodj-analysis` | db.rs, commands.rs, store.ts, App.tsx | `rustfft`, `rayon` |
 | 6 | E — Transitions | 1 new module in `autodj-core` | command.rs, engine.rs, lib.rs, commands.rs, store.ts, App.tsx | None |
 | 7 | F — AI Conductor | 5 new modules in `autodj-ai` | lib.rs, commands.rs, state.rs, store.ts, App.tsx | `reqwest`, `tokio` |
+
+---
+
+## Phase 9: Gemini AI DJ Automation
+
+Transition the AI conductor engine to utilize the Gemini API natively and expand the AI context payload to include precise timestamp and structural data for highly accurate transition predictions.
+
+### autodj-ai Changes
+
+#### [MODIFY] `llm.rs`
+- Migrate the `reqwest` payload from the OpenAI `chat/completions` format to the Google Gemini `generateContent` format.
+- Update headers to pass the API key via `x-goog-api-key` or the URL parameter.
+- Add `responseMimeType: "application/json"` and strict JSON schema injection into the Gemini `generationConfig`.
+- Update response parsing to correctly extract the nested JSON string from `body["candidates"][0]["content"]["parts"][0]["text"]`.
+
+#### [MODIFY] `context.rs`
+- Expand `CurrentStateContext` and `TrackProfileShort` to compute and attach `duration_ms` alongside derived phrase structural timestamps (e.g. 16-bar intro/outro milestones based on beat grids) so the model has concrete temporal awareness.
+
+#### [MODIFY] `planner.rs`
+- Expand `AiDecision` JSON serialization schema to explicitly parse dynamic timestamp actions (`execute_at_ms`) so the model has native timing vocabulary when issuing `transition_now` or `prepare_next`.
+- Adjust the internal prompt heuristic to instruct Gemini on using the millisecond timestamps provided in the context to optimally calculate mix-points.
+
+### Integration
+
+#### [MODIFY] `ui/src/store.ts` & Front-end Config
+- Update the Configuration menu so the user specifically provides a Gemini API Key rather than the default OpenAI Key prompt.

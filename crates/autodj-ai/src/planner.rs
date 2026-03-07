@@ -12,6 +12,7 @@ pub struct AiDecision {
     pub decision: String, // "wait", "transition_now", "prepare_next"
     pub reason: String,
     pub track_selection: Option<String>,
+    pub execute_at_ms: Option<u64>,
     pub transition_plan: Option<TransitionPlan>,
 }
 
@@ -74,9 +75,10 @@ impl AiPlanner {
 
     async fn query_llm(&self, context: &AiContext) -> Result<AiDecision, AiError> {
         let system_prompt = self.config.prompt_template.as_deref().unwrap_or(
-            "You are Auto-DJ, an expert AI club DJ. Analyze the current state and available tracks. \
+            "You are Auto-DJ, an expert AI club DJ. Analyze the current state, timing metrics, and available tracks. \
             Output valid JSON conforming to the AiDecision schema. Make sure to keep the energy flowing \
-            and select tracks that mix harmonically."
+            and select tracks that mix harmonically. Use the `duration_ms`, `elapsed_ms`, and `phrase_length_ms` \
+            to calculate the absolute optimal `execute_at_ms` timestamp to fire the next transition!"
         );
 
         let context_json = serde_json::to_string(context)
@@ -124,6 +126,7 @@ impl AiPlanner {
             decision: decision.to_string(),
             reason: format!("Heuristic fallback matched {} due to energy/key rating.", next_track.track_id),
             track_selection: Some(next_track.track_id.clone()),
+            execute_at_ms: Some(context.current_state.duration_ms.saturating_sub(10_000)),
             transition_plan: Some(TransitionPlan {
                 template_name: template_name.to_string(),
                 parameter_overrides: None,

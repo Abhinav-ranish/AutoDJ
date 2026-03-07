@@ -54,6 +54,13 @@ The project is structured as a Rust workspace:
    brew install ffmpeg
    ```
 
+5. Configure Gemini API Key:
+   Create a `.env` file in the project root:
+   ```env
+   GEMINI_API_KEY=your_api_key_here
+   ```
+   (Alternatively, you can set this directly in the application's Settings UI).
+
 ### Running for Development
 
 To start the application in development mode (hot-reloading for both UI and Rust), run from the **project root**:

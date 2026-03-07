@@ -81,3 +81,11 @@ ction — `camelot.rs`
 - [ ] Mix history + session tracking
 - [ ] Drag-and-drop import implementation
 - [ ] Audio export (mix recording)
+
+## Phase 9: Gemini AI DJ Automation
+- [x] Modify `llm.rs` to target Gemini `generateContent` endpoint instead of OpenAI.
+- [x] Update `llm.rs` payload to include `responseMimeType: "application/json"`.
+- [x] Parse `candidates.content.parts.text` correctly from Gemini JSON response.
+- [x] Expand `context.rs` to compute and attach Timestamp details (duration, beat boundaries) to the track context.
+- [x] Expand `planner.rs` `AiDecision` struct to accept an `execute_at_ms` action timestamp.
+- [x] Update frontend settings panel to reflect Gemini API integration.

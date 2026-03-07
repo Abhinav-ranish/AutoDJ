@@ -90,11 +90,12 @@ impl AppState {
     pub fn load_track_to_deck(
         &self,
         deck: DeckId,
+        track_id: String,
         track: Arc<TrackBuffer>,
     ) -> bool {
         self.track_loader
             .lock()
-            .map(|mut loader| loader.load(deck, track))
+            .map(|mut loader| loader.load(deck, track_id, track))
             .unwrap_or(false)
     }
 }

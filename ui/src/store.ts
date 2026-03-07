@@ -16,6 +16,7 @@ export interface TrackRecord {
 
 export interface DeckSnapshot {
     state: string;
+    track_id: string | null;
     position_ms: number;
     duration_ms: number;
     position_fraction: number;
@@ -63,8 +64,17 @@ interface DJStore {
     isThinking: boolean;
     errorToast: string | null;
     analyzingTracks: Set<string>;
+    aiConfig: {
+        enabled: boolean;
+        api_key: string;
+        model: string;
+        endpoint_url: string;
+        timeout_seconds: number;
+        prompt_template: string | null;
+    } | null;
 
     // Actions
+    initStore: () => Promise<void>;
     fetchTracks: () => Promise<void>;
     importFiles: (paths: string[]) => Promise<void>;
     loadTrack: (deck: "a" | "b", trackId: string) => Promise<void>;
@@ -104,10 +114,24 @@ export const useStore = create<DJStore>((set, get) => ({
     isThinking: false,
     errorToast: null,
     analyzingTracks: new Set(),
+    aiConfig: null,
 
     setErrorToast: (msg: string | null) => {
         set({ errorToast: msg });
         if (msg) setTimeout(() => set({ errorToast: null }), 3000);
+    },
+
+    initStore: async () => {
+        try {
+            const saved = localStorage.getItem("autodj_ai_config");
+            if (saved) {
+                const config = JSON.parse(saved);
+                set({ aiConfig: config });
+                await invoke("set_ai_config", { config });
+            }
+        } catch (e) {
+            console.error("Failed to restore AI config from localStorage", e);
+        }
     },
 
     fetchTracks: async () => {
@@ -339,6 +363,8 @@ export const useStore = create<DJStore>((set, get) => ({
     setAiConfig: async (config: any) => {
         try {
             await invoke("set_ai_config", { config });
+            localStorage.setItem("autodj_ai_config", JSON.stringify(config));
+            set({ aiConfig: config });
         } catch (e: any) {
             get().setErrorToast(`Set AI config failed: ${e}`);
             console.error("Set AI config failed:", e);
