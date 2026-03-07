@@ -104,7 +104,7 @@ impl LlmClient {
             .get("content")
             .and_then(|c| c.get("parts"))
             .and_then(|p| p.as_array())
-            .and_then(|p| p.get(0))
+            .and_then(|p| p.first())
             .and_then(|p| p.get("text"))
             .and_then(|t| t.as_str())
             .ok_or_else(|| AiError::ParseError("Failed to extract content text from Gemini payload".to_string()))?;

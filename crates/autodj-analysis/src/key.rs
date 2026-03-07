@@ -37,7 +37,7 @@ pub fn detect_key(samples: &[f32], sample_rate: u32) -> KeyInfo {
 
         for (bin, complex) in buffer.iter().enumerate().take(window_size / 2) {
             let freq = bin as f32 * sample_rate as f32 / window_size as f32;
-            if freq < 20.0 || freq > 5000.0 {
+            if !(20.0..=5000.0).contains(&freq) {
                 continue;
             }
 
@@ -65,7 +65,7 @@ pub fn detect_key(samples: &[f32], sample_rate: u32) -> KeyInfo {
 
     let notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
-    for root in 0..12 {
+    for (root, _) in notes.iter().enumerate() {
         let mut major_score = 0.0;
         let mut minor_score = 0.0;
 

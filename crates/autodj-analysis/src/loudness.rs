@@ -34,9 +34,7 @@ pub fn analyze_loudness(samples: &[f32], sample_rate: u32) -> LoudnessInfo {
     let mut max_rms_1s = -96.0_f32;
     let mut min_rms_1s = 0.0_f32;
 
-    let chunks = samples.chunks(window_samples);
-    let mut count = 0;
-    for chunk in chunks {
+    for (count, chunk) in samples.chunks(window_samples).enumerate() {
         if chunk.len() < window_samples / 2 { break; } // skip incomplete
         let mut ch_sq = 0.0;
         for &s in chunk {
@@ -44,7 +42,7 @@ pub fn analyze_loudness(samples: &[f32], sample_rate: u32) -> LoudnessInfo {
         }
         let ch_rms = (ch_sq / chunk.len() as f32).sqrt();
         let ch_db = if ch_rms > 1e-5 { 20.0 * ch_rms.log10() } else { -96.0 };
-        
+
         if count == 0 {
             max_rms_1s = ch_db;
             min_rms_1s = ch_db;
@@ -52,7 +50,6 @@ pub fn analyze_loudness(samples: &[f32], sample_rate: u32) -> LoudnessInfo {
             max_rms_1s = max_rms_1s.max(ch_db);
             min_rms_1s = min_rms_1s.min(ch_db);
         }
-        count += 1;
     }
 
     let dynamic_range_db = (max_rms_1s - min_rms_1s).max(0.0) as f64;

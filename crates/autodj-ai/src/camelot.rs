@@ -8,7 +8,7 @@ pub fn camelot_distance(key_a: &str, key_b: &str) -> u32 {
 
     match (a_idx, b_idx) {
         (Some((num_a, is_major_a)), Some((num_b, is_major_b))) => {
-            let mut diff = ((num_a as i32 - num_b as i32).abs()) as u32;
+            let mut diff = num_a.abs_diff(num_b) as u32;
             if diff > 6 {
                 diff = 12 - diff; // Wrap around the clock
             }
@@ -39,8 +39,8 @@ fn parse_camelot(key: &str) -> Option<(u8, bool)> {
     }
 
     let is_major = key.ends_with('B');
-    let num_str = key.trim_end_matches(|c| c == 'A' || c == 'B');
-    num_str.parse::<u8>().ok().filter(|&n| n >= 1 && n <= 12).map(|n| (n, is_major))
+    let num_str = key.trim_end_matches(['A', 'B']);
+    num_str.parse::<u8>().ok().filter(|&n| (1..=12).contains(&n)).map(|n| (n, is_major))
 }
 
 #[cfg(test)]

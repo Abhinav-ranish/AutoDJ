@@ -57,7 +57,7 @@ impl TransportClock {
         // Detect beat boundary (phase wrapped around).
         if self.beat_phase < prev_phase {
             self.beat_number += 1;
-            if self.beat_number % self.beats_per_bar as u64 == 0 {
+            if self.beat_number.is_multiple_of(self.beats_per_bar as u64) {
                 self.bar_number += 1;
             }
             true

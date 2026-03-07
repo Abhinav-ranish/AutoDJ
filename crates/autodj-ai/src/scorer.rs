@@ -96,7 +96,7 @@ impl HeuristicScorer {
             "relax" | "breakdown" => {
                 if diff < -0.1 { 1.0 } else { 0.3 }
             }
-            "maintain" | _ => {
+            _ => {
                 if diff.abs() < 0.15 { 1.0 } else { 0.5 }
             }
         }

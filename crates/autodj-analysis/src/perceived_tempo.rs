@@ -130,7 +130,7 @@ fn classify_groove(
     // ── Reggaeton / Dembow ──────────────────────────────────────
     // Range: 80–115 BPM. Dembow has a distinctive dense, syncopated pattern.
     // High onset density + moderate variance = dembow rhythm.
-    if bpm >= 80.0 && bpm <= 115.0 {
+    if (80.0..=115.0).contains(&bpm) {
         if avg_onsets > 1.5 || onset_variance > 0.5 {
             return ("dembow", bpm * 1.15, 0.85);
         }
@@ -143,37 +143,37 @@ fn classify_groove(
     // ── Trap / Half-Time ────────────────────────────────────────
     // Range: 120–170 BPM with sparse beats (half-time feel).
     // High sparsity = lots of silent beats = half-time groove.
-    if bpm >= 120.0 && bpm <= 170.0 && sparsity_ratio > 0.15 {
+    if (120.0..=170.0).contains(&bpm) && sparsity_ratio > 0.15 {
         return ("trap_half_time", bpm / 2.0, 0.82);
     }
 
     // ── Hip-Hop / Boom Bap ──────────────────────────────────────
     // Range: 80–100 BPM. Moderate onsets, moderate variance.
-    if bpm >= 80.0 && bpm < 100.0 && avg_onsets < 2.0 && sparsity_ratio < 0.15 {
+    if (80.0..100.0).contains(&bpm) && avg_onsets < 2.0 && sparsity_ratio < 0.15 {
         return ("boom_bap", bpm, 0.70);
     }
 
     // ── Drill ───────────────────────────────────────────────────
     // Range: 135–150 BPM. Dense hi-hats (high onset count) + syncopation.
-    if bpm >= 135.0 && bpm <= 155.0 && avg_onsets > 3.0 {
+    if (135.0..=155.0).contains(&bpm) && avg_onsets > 3.0 {
         return ("drill", bpm, 0.75);
     }
 
     // ── Jersey Club ─────────────────────────────────────────────
     // Range: 130–145 BPM. Very high onset density with bouncy feel.
-    if bpm >= 130.0 && bpm <= 145.0 && avg_onsets > 2.5 && onset_variance > 1.0 {
+    if (130.0..=145.0).contains(&bpm) && avg_onsets > 2.5 && onset_variance > 1.0 {
         return ("jersey_club", bpm, 0.72);
     }
 
     // ── Four-on-the-Floor (House / Techno) ──────────────────────
     // Range: 118–135 BPM. Low energy variance = very steady kick pattern.
-    if bpm >= 118.0 && bpm <= 135.0 && energy_variance < 0.002 && sparsity_ratio < 0.05 {
+    if (118.0..=135.0).contains(&bpm) && energy_variance < 0.002 && sparsity_ratio < 0.05 {
         return ("four_on_floor", bpm, 0.88);
     }
 
     // ── Techno ──────────────────────────────────────────────────
     // Range: 130–155 BPM. Very steady, very low variance.
-    if bpm >= 130.0 && bpm <= 155.0 && energy_variance < 0.003 && sparsity_ratio < 0.08 {
+    if (130.0..=155.0).contains(&bpm) && energy_variance < 0.003 && sparsity_ratio < 0.08 {
         return ("four_on_floor", bpm, 0.80);
     }
 
@@ -185,7 +185,7 @@ fn classify_groove(
 
     // ── DnB ─────────────────────────────────────────────────────
     // Very fast: 160–185 BPM.
-    if bpm >= 160.0 && bpm <= 185.0 {
+    if (160.0..=185.0).contains(&bpm) {
         return ("drum_and_bass", bpm, 0.75);
     }
 

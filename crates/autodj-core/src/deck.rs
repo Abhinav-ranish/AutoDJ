@@ -178,7 +178,7 @@ impl Deck {
     pub fn position_fraction(&self) -> f64 {
         match &self.track {
             Some(t) if t.total_frames() > 0 => {
-                self.position as f64 / t.total_frames() as f64
+                self.position / t.total_frames() as f64
             }
             _ => 0.0,
         }

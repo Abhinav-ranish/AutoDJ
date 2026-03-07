@@ -49,7 +49,7 @@ pub fn detect_bpm(samples: &[f32], sample_rate: u32) -> TempoInfo {
 
     fft.process(&mut signal);
     for c in &mut signal {
-        *c = *c * c.conj();
+        *c *= c.conj();
     }
     ifft.process(&mut signal);
 
@@ -71,18 +71,18 @@ pub fn detect_bpm(samples: &[f32], sample_rate: u32) -> TempoInfo {
         for lag in min_lag..=max_lag {
             let score = signal[lag].re;
             // Simple peak picking
-            if lag > min_lag && lag < max_lag {
-                if score > signal[lag - 1].re && score > signal[lag + 1].re {
-                    let bpm = 60.0 / (lag as f64 * 0.01);
-                    let normalized_score = (score / max_val.max(1e-5)) as f64;
-                    candidates.push(TempoCandidate {
-                        bpm,
-                        confidence: normalized_score,
-                    });
-                    if normalized_score > best_score {
-                        best_score = normalized_score;
-                        best_bpm = bpm;
-                    }
+            if lag > min_lag && lag < max_lag
+                && score > signal[lag - 1].re && score > signal[lag + 1].re
+            {
+                let bpm = 60.0 / (lag as f64 * 0.01);
+                let normalized_score = (score / max_val.max(1e-5)) as f64;
+                candidates.push(TempoCandidate {
+                    bpm,
+                    confidence: normalized_score,
+                });
+                if normalized_score > best_score {
+                    best_score = normalized_score;
+                    best_bpm = bpm;
                 }
             }
         }

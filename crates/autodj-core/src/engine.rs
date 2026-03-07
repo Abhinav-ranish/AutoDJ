@@ -311,7 +311,7 @@ impl AudioEngine {
                         frame_counter += 1;
 
                         // Emit state snapshot at ~30 Hz
-                        if frame_counter % snapshot_interval == 0 {
+                        if frame_counter.is_multiple_of(snapshot_interval) {
                             let snapshot = EngineStateSnapshot {
                                 deck_a: DeckSnapshot::from_deck(&deck_a, sr),
                                 deck_b: DeckSnapshot::from_deck(&deck_b, sr),
