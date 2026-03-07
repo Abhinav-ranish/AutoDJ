@@ -240,7 +240,7 @@ body {
 
 .track-list-header {
   display: grid;
-  grid-template-columns: minmax(50px, 1fr) minmax(50px, 0.8fr) 80px 70px 80px auto;
+  grid-template-columns: minmax(50px, 1.2fr) minmax(50px, 1fr) 60px 60px 70px 200px;
   padding: var(--gap-sm) var(--gap-md);
   font-size: 11px;
   font-weight: 600;
@@ -256,7 +256,7 @@ body {
 
 .track-row {
   display: grid;
-  grid-template-columns: minmax(50px, 1fr) minmax(50px, 0.8fr) 80px 70px 80px auto;
+  grid-template-columns: minmax(50px, 1.2fr) minmax(50px, 1fr) 60px 60px 70px 200px;
   padding: var(--gap-sm) var(--gap-md);
   font-size: 13px;
   border-bottom: 1px solid var(--border-subtle);
