@@ -43,3 +43,10 @@ d3560fa Initial commit
 Here is a recording showing the functional React frontend for Auto-DJ:
 
 ![AutoDJ UI Demo](/Users/ragebaiter/.gemini/antigravity/brain/ed7c4ebe-84d6-498f-802e-8192e2300b5f/autodj_app_demo_1772763182766.webp)
+
+## Phase 8: Polish & Bug Resolutions
+
+- **Seek Bounds/Precision**: Enforced strict integer boundary calculations and mounted waveform components to the active React event dispatcher enabling clicking anywhere within the duration bounds to instantly seek the song.
+- **Mixer EQ Tuning**: Re-aligned the serialization parameters for `gain_db` linking the front-end inputs properly to `autodj-core` deck 3-band sweeps.
+- **Dynamic Speed Modulation**: Synced the local TS UI `tempo` sliders to dispatch real deck playback speed scalars to the backend (boosting available slider range to ±25%) rather than locking into the Transport Clock. 
+- **Auto Transitions Signature Fix**: Repackaged the `execute_transition` params to respect the new Rust template macros containing nested JSON shapes.

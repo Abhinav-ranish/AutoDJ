@@ -174,7 +174,7 @@ function EqKnob({
                 type="range"
                 className="eq-slider"
                 min={-96}
-                max={6}
+                max={12}
                 step={0.5}
                 value={value}
                 onChange={(e) => onChange(Number(e.target.value))}
@@ -282,7 +282,7 @@ function DeckPanel({
     className: string;
     masterBpm: number;
 }) {
-    const { engineState, play, pause, setDeckGain, setEq, setFilter, setLoop, clearLoop, setTempo, tracks, mode, getTrackProfile, seek } = useStore();
+    const { engineState, play, pause, setDeckGain, setEq, setFilter, setLoop, clearLoop, setDeckSpeed, tracks, mode, getTrackProfile, seek } = useStore();
 
     const snapshot =
         deckId === "A" ? engineState?.deck_a : engineState?.deck_b;
@@ -456,7 +456,13 @@ function DeckPanel({
 
             {!isEmpty && (
                 <>
-                    <div className="progress-bar">
+                    <div className="progress-bar" onClick={(e) => {
+                        if (!snapshot) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const x = e.clientX - rect.left;
+                        const fraction = Math.max(0, Math.min(1, x / rect.width));
+                        seek(deckId, fraction * snapshot.duration_ms);
+                    }} style={{ cursor: "pointer" }}>
                         <div
                             className="progress-fill"
                             style={{
@@ -496,7 +502,7 @@ function DeckPanel({
                                 <input
                                     type="range"
                                     className="gain-slider"
-                                    min={-96}
+                                    min={-12}
                                     max={12}
                                     step={0.5}
                                     value={localGain}
@@ -507,9 +513,9 @@ function DeckPanel({
                                     }}
                                 />
                                 <span className="gain-value">
-                                    {localGain <= -90
+                                    {localGain <= -11.5
                                         ? "-∞"
-                                        : `${localGain.toFixed(0)}`}
+                                        : `${localGain.toFixed(1)}`}
                                 </span>
                             </div>
 
@@ -597,28 +603,28 @@ function DeckPanel({
                                     className="tempo-btn"
                                     title="Nudge −2 BPM"
                                     onClick={() => {
-                                        const next = Math.max(originalBpm * 0.92, localBpm - 2);
+                                        const next = Math.max(originalBpm * 0.75, localBpm - 2);
                                         setLocalBpm(next);
-                                        setTempo(deckId, next);
+                                        setDeckSpeed(deckId, next / originalBpm);
                                     }}
                                     disabled={isEmpty}
                                 >
                                     «
                                 </button>
 
-                                {/* Tempo slider ±8% */}
+                                {/* Tempo slider ±25% */}
                                 <input
                                     type="range"
                                     className="tempo-slider"
-                                    min={originalBpm * 0.92}
-                                    max={originalBpm * 1.08}
+                                    min={originalBpm * 0.75}
+                                    max={originalBpm * 1.25}
                                     step={0.1}
                                     value={localBpm}
                                     disabled={isEmpty}
                                     onChange={(e) => {
                                         const v = Number(e.target.value);
                                         setLocalBpm(v);
-                                        setTempo(deckId, v);
+                                        setDeckSpeed(deckId, v / originalBpm);
                                     }}
                                 />
 
@@ -627,9 +633,9 @@ function DeckPanel({
                                     className="tempo-btn"
                                     title="Nudge +2 BPM"
                                     onClick={() => {
-                                        const next = Math.min(originalBpm * 1.08, localBpm + 2);
+                                        const next = Math.min(originalBpm * 1.25, localBpm + 2);
                                         setLocalBpm(next);
-                                        setTempo(deckId, next);
+                                        setDeckSpeed(deckId, next / originalBpm);
                                     }}
                                     disabled={isEmpty}
                                 >
@@ -642,7 +648,7 @@ function DeckPanel({
                                     className={`sync-btn sync-btn-${deckId.toLowerCase()}`}
                                     onClick={() => {
                                         setLocalBpm(masterBpm);
-                                        setTempo(deckId, masterBpm);
+                                        setDeckSpeed(deckId, masterBpm / originalBpm);
                                     }}
                                     disabled={isEmpty}
                                 >
@@ -654,7 +660,7 @@ function DeckPanel({
                                     title="Reset to original BPM"
                                     onClick={() => {
                                         setLocalBpm(originalBpm);
-                                        setTempo(deckId, originalBpm);
+                                        setDeckSpeed(deckId, 1);
                                     }}
                                     disabled={isEmpty}
                                 >
@@ -715,18 +721,37 @@ function DeckPanel({
 
 // ─── Filter ↔ Slider Helpers ─────────────────────────────────────
 
-/** Convert cutoff Hz (20–20000) to a 0–100 slider value (log scale) */
 function filterToSlider(hz: number): number {
-    const logMin = Math.log(20);
-    const logMax = Math.log(20000);
-    return ((Math.log(Math.max(20, hz)) - logMin) / (logMax - logMin)) * 100;
+    if (hz >= 19500) return 50; // Center bypass
+
+    // If it's in Highpass range (<= 1000Hz)
+    if (hz <= 1000) {
+        const frac = (hz - 20) / (1000 - 20);
+        return 51 + frac * 49;
+    }
+
+    // If it's in Lowpass range (> 1000Hz)
+    else {
+        const frac = (hz - 1000) / (20000 - 1000);
+        return frac * 49;
+    }
 }
 
 /** Convert 0–100 slider value to cutoff Hz (log scale) */
 function sliderToFilter(val: number): number {
-    const logMin = Math.log(20);
-    const logMax = Math.log(20000);
-    return Math.exp(logMin + (val / 100) * (logMax - logMin));
+    if (val === 50) return 20000; // bypass (LP at 20kHz)
+
+    // Left side (0-49): Lowpass filtering, cutoff goes from 1000Hz (at 0) up to 20000Hz (at 50)
+    if (val < 50) {
+        const frac = val / 49; // 0 to 1
+        return 1000 + frac * (20000 - 1000);
+    }
+
+    // Right side (51-100): Highpass filtering, cutoff goes from 20Hz (at 50) up to 1000Hz (at 100)
+    else {
+        const frac = (val - 51) / 49; // 0 to 1
+        return 20 + frac * (1000 - 20);
+    }
 }
 
 // ─── DJ View ─────────────────────────────────────────────────────
@@ -903,12 +928,31 @@ function TransitionsPanel() {
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     const handleGo = async () => {
-        // Auto-detect direction: If deck A is playing and B is stopped/paused, target B as incoming.
-        const deckA_playing = engineState?.deck_a?.state === "playing";
-        const incomingDeck = deckA_playing ? "B" : "A";
+        if (!engineState) return;
+
+        // Auto-detect direction based strictly on the Crossfader Position.
+        // If crossfader is > 0 (leaning towards B), we are playing Deck B. Incoming deck should be A.
+        // If crossfader is < 0 (leaning towards A), we are playing Deck A. Incoming deck should be B.
+        // If crossfader is 0, we check which deck is actively playing audio.
+        let incomingDeck = "B";
+
+        if (engineState.crossfader > 0.1) {
+            incomingDeck = "A";
+        } else if (engineState.crossfader < -0.1) {
+            incomingDeck = "B";
+        } else {
+            // Crossfader is centered. Transition towards whichever deck is PAUSED or EMPTY. 
+            // If both are playing, default to B.
+            const aPlaying = engineState.deck_a?.state === "playing";
+            const bPlaying = engineState.deck_b?.state === "playing";
+
+            if (aPlaying && !bPlaying) incomingDeck = "B";
+            else if (!aPlaying && bPlaying) incomingDeck = "A";
+            else incomingDeck = "B";
+        }
 
         // Compute animation duration: duration beats × (60s / BPM) — each "beat" here is a bar (4 beats)
-        const masterBpm = engineState?.master_bpm ?? 128;
+        const masterBpm = engineState.master_bpm ?? 128;
         const durationSeconds = (duration / masterBpm) * 60 * 4;
         const durationMs = durationSeconds * 1000;
 

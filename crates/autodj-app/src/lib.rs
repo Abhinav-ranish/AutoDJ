@@ -40,6 +40,7 @@ pub fn run() {
             commands::set_loop,
             commands::clear_loop,
             commands::set_tempo,
+            commands::set_speed,
             commands::analyze_track,
             commands::get_track_profile,
             commands::get_engine_state,

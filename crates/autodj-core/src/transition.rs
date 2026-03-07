@@ -31,18 +31,11 @@ impl TransitionTemplate for SmoothBeatmix {
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
         let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
         let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
-        let incoming_start_beat = params["incoming_start_beat"].as_u64().unwrap_or(0);
         let bass_swap_bar = params["bass_swap_bar"].as_u64().unwrap_or(8) as u32;
 
         let mut commands = Vec::new();
 
         // 1. Initial State: Incoming deck plays silently
-        commands.push(ScheduledCommand {
-            command: Command::Seek { deck: incoming_deck, beat: incoming_start_beat },
-            source: CommandSource::System,
-            schedule: SchedulePoint::NextBar,
-            target_sample: None,
-        });
         commands.push(ScheduledCommand {
             command: Command::SetDeckGain { deck: incoming_deck, gain_db: -96.0 },
             source: CommandSource::System,

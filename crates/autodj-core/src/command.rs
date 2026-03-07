@@ -48,6 +48,7 @@ pub enum Owner {
 
 /// EQ band identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum EqBand {
     Low,
     Mid,
@@ -128,7 +129,7 @@ impl CommandValidator {
                 Some(Command::SetEq {
                     deck,
                     band,
-                    gain_db: gain_db.clamp(-96.0, 6.0),
+                    gain_db: gain_db.clamp(-96.0, 12.0),
                 })
             }
             Command::SetFilter { deck, cutoff_hz, resonance } => {
@@ -211,7 +212,7 @@ mod tests {
         });
         match cmd {
             Some(Command::SetEq { gain_db, .. }) => {
-                assert!((gain_db - 6.0).abs() < f32::EPSILON);
+                assert!((gain_db - 12.0).abs() < f32::EPSILON);
             }
             _ => panic!("Expected SetEq"),
         }

@@ -71,4 +71,13 @@ ction — `camelot.rs`
 - [x] UI: mode switcher, AI status, suggestion panel, config panel
 - [x] Tests: scorer ranking, camelot distance, mock LLM, fallback path
 
-## Phase 8: Milestone G — Polish + Export
+## Phase 8: Milestone G — Polish + Export ✅
+- [x] Read ID3 tags (Title/Artist) on import (`lofty` crate)
+- [x] Auto-sync deck BPM on load
+- [x] Waveform rendering on `<canvas>` with playhead overlay
+- [x] UI: Fine-grain BPM nudge controls and tempo sliders
+- [x] Backend: Hot cue storage and seek dispatching
+- [x] Clear library functionality
+- [ ] Mix history + session tracking
+- [ ] Drag-and-drop import implementation
+- [ ] Audio export (mix recording)

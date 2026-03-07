@@ -76,7 +76,7 @@ interface DJStore {
     setFilter: (deck: string, cutoffHz: number, resonance: number) => Promise<void>;
     setLoop: (deck: string, lengthBars: number) => Promise<void>;
     clearLoop: (deck: string) => Promise<void>;
-    setTempo: (deck: string, bpm: number) => Promise<void>;
+    setDeckSpeed: (deck: string, speedMultiplier: number) => Promise<void>;
     pollEngineState: () => Promise<void>;
     setActiveView: (view: "dj" | "library") => void;
     analyzeTrack: (trackId: string) => Promise<void>;
@@ -170,7 +170,7 @@ export const useStore = create<DJStore>((set, get) => ({
 
     seek: async (deck: string, positionMs: number) => {
         try {
-            await invoke("seek", { deck: deck.toLowerCase(), positionMs });
+            await invoke("seek", { deck: deck.toLowerCase(), positionMs: Math.round(positionMs) });
         } catch (e: any) {
             get().setErrorToast(`Seek failed: ${e}`);
             console.error("Seek failed:", e);
@@ -231,9 +231,9 @@ export const useStore = create<DJStore>((set, get) => ({
         }
     },
 
-    setTempo: async (deck: string, bpm: number) => {
+    setDeckSpeed: async (deck: string, speedMultiplier: number) => {
         try {
-            await invoke("set_tempo", { deck: deck.toLowerCase(), bpm });
+            await invoke("set_speed", { deck: deck.toLowerCase(), speed: speedMultiplier });
         } catch (e: any) {
             get().setErrorToast(`Set tempo failed: ${e}`);
             console.error("Set tempo failed:", e);
@@ -277,7 +277,10 @@ export const useStore = create<DJStore>((set, get) => ({
 
     executeTransition: async (deck: string, template: string, durationBars: number) => {
         try {
-            await invoke("execute_transition", { deck: deck.toLowerCase(), template, durationBars });
+            await invoke("execute_transition", {
+                template,
+                params: { incoming_deck: deck.toUpperCase(), duration_bars: durationBars }
+            });
         } catch (e: any) {
             get().setErrorToast(`Transition failed: ${e}`);
             console.error("Transition failed:", e);
