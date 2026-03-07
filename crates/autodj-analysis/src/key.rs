@@ -107,6 +107,6 @@ fn key_to_cameloc(key: &str, major: bool) -> String {
         ("C", "8"), ("G", "9"), ("D", "10"), ("A", "11"), ("E", "12"), ("B", "1"),
         ("F#", "2"), ("C#", "3"), ("G#", "4"), ("D#", "5"), ("A#", "6"), ("F", "7"),
     ];
-    let (base, _) = mapping.iter().find(|(k, _)| *k == key).unwrap_or(&("C", "8"));
+    let (_base, _) = mapping.iter().find(|(k, _)| *k == key).unwrap_or(&("C", "8"));
     format!("{}{}", mapping.iter().find(|(k, _)| *k == key).map(|(_, v)| *v).unwrap_or("8"), if major { "B" } else { "A" })
 }

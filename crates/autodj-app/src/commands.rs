@@ -10,7 +10,6 @@ use crate::state::DjMode;
 use std::path::PathBuf;
 use std::sync::Arc;
 use lofty::prelude::*;
-use lofty::file::AudioFile;
 use lofty::tag::Accessor;
 use tauri::State;
 

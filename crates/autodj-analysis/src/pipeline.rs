@@ -6,7 +6,7 @@ use crate::energy::analyze_energy;
 use crate::key::detect_key;
 use crate::loudness::analyze_loudness;
 use crate::perceived_tempo::analyze_perceived_tempo;
-use crate::profile::{RegionInfo, TrackProfile};
+use crate::profile::TrackProfile;
 use crate::sections::analyze_sections;
 use crate::waveform::analyze_waveform;
 use std::path::Path;

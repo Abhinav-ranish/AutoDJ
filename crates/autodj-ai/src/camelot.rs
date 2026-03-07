@@ -1,10 +1,5 @@
 //! Camelot Wheel distance function for harmonic mixing.
 
-const CAMELOT_KEYS: [&str; 24] = [
-    "1A", "1B", "2A", "2B", "3A", "3B", "4A", "4B", "5A", "5B", "6A", "6B",
-    "7A", "7B", "8A", "8B", "9A", "9B", "10A", "10B", "11A", "11B", "12A", "12B",
-];
-
 /// Computes the harmonic distance between two Camelot keys.
 /// Returns 0 for an exact match, 1 for adjacent, 2 for related, etc.
 pub fn camelot_distance(key_a: &str, key_b: &str) -> u32 {

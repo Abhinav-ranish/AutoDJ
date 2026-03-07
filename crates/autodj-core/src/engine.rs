@@ -353,7 +353,7 @@ impl AudioEngine {
         deck_b: &mut Deck,
         mixer: &mut Mixer,
         transport: &mut TransportClock,
-        sample_rate: u32,
+        _sample_rate: u32,
     ) {
         match command {
             Command::Play { deck } => {
