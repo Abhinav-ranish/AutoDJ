@@ -405,10 +405,9 @@ function DeckPanel({
         }
     }, [snapshot?.loop_active, snapshot?.loop_start_ms, snapshot?.loop_end_ms, masterBpm]);
 
-    const originalBpm = (() => {
-        if (!snapshot || snapshot.state === "empty") return masterBpm;
-        // Try to match by duration_ms (closest match within ±500 ms)
-        const snapDur = snapshot.duration_ms;
+    const getOriginalBpm = (snap: any) => {
+        if (!snap || snap.state === "empty") return masterBpm;
+        const snapDur = snap.duration_ms;
         if (snapDur > 0) {
             let best: typeof tracks[0] | null = null;
             let bestDiff = Infinity;
@@ -421,7 +420,12 @@ function DeckPanel({
             if (best?.bpm) return best.bpm;
         }
         return masterBpm;
-    })();
+    };
+
+    const originalBpm = getOriginalBpm(snapshot);
+    const otherSnapshot = deckId === "A" ? engineState?.deck_b : engineState?.deck_a;
+    const otherOriginalBpm = getOriginalBpm(otherSnapshot);
+    const otherCurrentBpm = otherOriginalBpm * (otherSnapshot?.speed ?? 1.0);
 
     const [localBpm, setLocalBpm] = useState(masterBpm);
 
@@ -643,24 +647,38 @@ function DeckPanel({
                                 </button>
                             </div>
                             <div className="tempo-actions">
-                                {/* SYNC to master */}
+                                {/* SYNC to opposite deck */}
                                 <button
                                     className={`sync-btn sync-btn-${deckId.toLowerCase()}`}
                                     onClick={() => {
-                                        setLocalBpm(masterBpm);
-                                        setDeckSpeed(deckId, masterBpm / originalBpm);
+                                        setLocalBpm(otherCurrentBpm);
+                                        setDeckSpeed(deckId, otherCurrentBpm / originalBpm);
                                     }}
                                     disabled={isEmpty}
                                 >
                                     SYNC
                                 </button>
-                                {/* Reset to original */}
+                                {/* Reset deck to defaults */}
                                 <button
                                     className="tempo-btn reset-btn"
-                                    title="Reset to original BPM"
+                                    title="Reset deck parameters"
                                     onClick={() => {
                                         setLocalBpm(originalBpm);
                                         setDeckSpeed(deckId, 1);
+
+                                        setLocalGain(0);
+                                        setDeckGain(deckId, 0);
+
+                                        setLocalHi(0);
+                                        setEq(deckId, "high", 0);
+                                        setLocalMid(0);
+                                        setEq(deckId, "mid", 0);
+                                        setLocalLo(0);
+                                        setEq(deckId, "low", 0);
+
+                                        const defaultHz = sliderToFilter(50);
+                                        setLocalFilter(50);
+                                        setFilter(deckId, defaultHz, snapshot?.filter_resonance ?? 0.7);
                                     }}
                                     disabled={isEmpty}
                                 >

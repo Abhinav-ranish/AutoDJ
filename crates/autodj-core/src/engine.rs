@@ -57,6 +57,7 @@ pub struct DeckSnapshot {
     pub loop_active: bool,
     pub loop_start_ms: u64,
     pub loop_end_ms: u64,
+    pub speed: f64,
 }
 
 impl DeckSnapshot {
@@ -99,6 +100,7 @@ impl DeckSnapshot {
             loop_active: deck.loop_active(),
             loop_start_ms,
             loop_end_ms,
+            speed: deck.speed,
         }
     }
 }

@@ -28,6 +28,7 @@ export interface DeckSnapshot {
     loop_active: boolean;
     loop_start_ms: number;
     loop_end_ms: number;
+    speed: number;
 }
 
 export interface EngineState {
