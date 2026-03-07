@@ -15,6 +15,9 @@ export interface TrackRecord {
     groove_type: string | null;
     key: string | null;
     lufs: number | null;
+    genre: string | null;
+    mood: string | null;
+    vibe: string | null;
 }
 
 export interface DeckSnapshot {
@@ -103,6 +106,12 @@ interface DJStore {
     requestNextTrack: () => Promise<void>;
     setAiConfig: (config: any) => Promise<void>;
 
+    // Recording
+    isRecording: boolean;
+    recordingStartTime: number | null;
+    startRecording: () => Promise<void>;
+    stopRecording: () => Promise<void>;
+
     setErrorToast: (msg: string | null) => void;
     setEngineState: (state: EngineState) => void;
 }
@@ -118,6 +127,8 @@ export const useStore = create<DJStore>((set, get) => ({
     errorToast: null,
     analyzingTracks: new Set(),
     aiConfig: null,
+    isRecording: false,
+    recordingStartTime: null,
 
     setErrorToast: (msg: string | null) => {
         set({ errorToast: msg });
@@ -323,6 +334,26 @@ export const useStore = create<DJStore>((set, get) => ({
         } catch (e: any) {
             get().setErrorToast(`Clear library failed: ${e}`);
             console.error("Clear library failed:", e);
+        }
+    },
+
+    startRecording: async () => {
+        try {
+            const now = new Date();
+            const filename = `AutoDJ_Mix_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}_${String(now.getHours()).padStart(2,"0")}${String(now.getMinutes()).padStart(2,"0")}.wav`;
+            await invoke("start_recording", { filename });
+            set({ isRecording: true, recordingStartTime: Date.now() });
+        } catch (e: any) {
+            get().setErrorToast(`Recording failed: ${e}`);
+        }
+    },
+
+    stopRecording: async () => {
+        try {
+            await invoke("stop_recording");
+            set({ isRecording: false, recordingStartTime: null });
+        } catch (e: any) {
+            get().setErrorToast(`Stop recording failed: ${e}`);
         }
     },
 

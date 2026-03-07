@@ -11,6 +11,7 @@ pub struct AiContext {
     pub preferences: PreferencesContext,
     pub constraints: ConstraintsContext,
     pub available_tracks: Vec<TrackProfileShort>,
+    pub set_flow: Option<SetFlowContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +30,15 @@ pub struct CurrentStateContext {
     pub time_remaining_ms: u64,
     pub duration_ms: u64,
     pub phrase_length_ms: u64,
+    // Phase 14: enriched fields
+    pub genre: Option<String>,
+    pub mood: Option<String>,
+    pub vibe: Option<String>,
+    pub vocal_presence: Option<f64>,
+    pub energy_trajectory: Option<String>,
+    pub intro_length_ms: Option<u64>,
+    pub outro_length_ms: Option<u64>,
+    pub first_drop_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +67,38 @@ pub struct TrackProfileShort {
     pub lufs_loudness: f64,
     pub duration_ms: u64,
     pub phrase_length_ms: u64,
+    // Phase 14: enriched fields
+    pub genre: Option<String>,
+    pub subgenre: Option<String>,
+    pub mood: Option<String>,
+    pub vibe: Option<String>,
+    pub mix_notes: Option<String>,
+    pub spectral_centroid: Option<f64>,
+    pub vocal_presence: Option<f64>,
+    pub danceability: Option<f64>,
+    pub energy_trajectory: Option<String>,
+    pub intro_length_ms: Option<u64>,
+    pub outro_length_ms: Option<u64>,
+}
+
+/// Set-level flow tracking for AI decisions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetFlowContext {
+    pub tracks_played: u32,
+    pub elapsed_minutes: f64,
+    pub recent_genres: Vec<String>,
+    pub recent_moods: Vec<String>,
+    pub energy_trend: String,
+}
+
+/// Classification data for a track (loaded from DB).
+#[derive(Debug, Clone, Default)]
+pub struct TrackClassificationData {
+    pub genre: Option<String>,
+    pub subgenre: Option<String>,
+    pub mood: Option<String>,
+    pub vibe: Option<String>,
+    pub mix_notes: Option<String>,
 }
 
 /// Input parameters for building AI context.
@@ -70,31 +112,32 @@ pub struct ContextInput<'a> {
     pub target_energy: f64,
     pub recent_tracks: &'a [String],
     pub available_metadata: &'a std::collections::HashMap<String, (String, String)>,
+    pub classifications: &'a std::collections::HashMap<String, TrackClassificationData>,
+    pub set_flow: Option<SetFlowContext>,
 }
 
 pub fn build_context(input: &ContextInput) -> AiContext {
     let engine_state = input.engine_state;
     let playing_track_profile = input.playing_track_profile;
-    let playing_artist = input.playing_artist;
-    let playing_title = input.playing_title;
     let available_profiles = input.available_profiles;
-    let intent = input.intent;
-    let target_energy = input.target_energy;
-    let recent_tracks = input.recent_tracks;
     let available_metadata = input.available_metadata;
-    // Determine playing deck and time remaining
-    // For simplicity, we just use the active deck as the one playing
+
     let deck_a_playing = engine_state.deck_a.state == "playing";
     let playing_deck = if deck_a_playing { "A" } else { "B" };
     let deck_snapshot = if deck_a_playing { &engine_state.deck_a } else { &engine_state.deck_b };
-    
+
     let time_remaining_ms = deck_snapshot.duration_ms.saturating_sub(deck_snapshot.position_ms);
+
+    let playing_class = input.classifications
+        .get(&playing_track_profile.track_id)
+        .cloned()
+        .unwrap_or_default();
 
     let current_state = CurrentStateContext {
         playing_deck: playing_deck.to_string(),
         track_id: playing_track_profile.track_id.clone(),
-        artist: playing_artist.to_string(),
-        title: playing_title.to_string(),
+        artist: input.playing_artist.to_string(),
+        title: input.playing_title.to_string(),
         bpm: playing_track_profile.tempo.bpm,
         perceived_tempo: playing_track_profile.perceived_tempo.as_ref()
             .map(|pt| pt.perceived_tempo)
@@ -109,17 +152,25 @@ pub fn build_context(input: &ContextInput) -> AiContext {
         time_remaining_ms,
         duration_ms: deck_snapshot.duration_ms,
         phrase_length_ms: (60_000.0 / playing_track_profile.tempo.bpm * 16.0) as u64,
+        genre: playing_class.genre,
+        mood: playing_class.mood,
+        vibe: playing_class.vibe,
+        vocal_presence: playing_track_profile.vocal_presence,
+        energy_trajectory: playing_track_profile.energy_trajectory.clone(),
+        intro_length_ms: playing_track_profile.intro_length_ms,
+        outro_length_ms: playing_track_profile.outro_length_ms,
+        first_drop_ms: playing_track_profile.first_drop_ms,
     };
 
     let preferences = PreferencesContext {
-        intent: intent.to_string(),
-        target_energy,
+        intent: input.intent.to_string(),
+        target_energy: input.target_energy,
     };
 
     let constraints = ConstraintsContext {
         max_bpm_difference: 15.0,
         allow_key_shift: true,
-        recent_tracks: recent_tracks.to_vec(),
+        recent_tracks: input.recent_tracks.to_vec(),
     };
 
     let available_tracks = available_profiles
@@ -129,7 +180,12 @@ pub fn build_context(input: &ContextInput) -> AiContext {
                 .get(&p.track_id)
                 .cloned()
                 .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
-            
+
+            let class = input.classifications
+                .get(&p.track_id)
+                .cloned()
+                .unwrap_or_default();
+
             TrackProfileShort {
                 id: p.track_id.clone(),
                 artist,
@@ -146,6 +202,17 @@ pub fn build_context(input: &ContextInput) -> AiContext {
                 lufs_loudness: p.loudness.integrated_lufs,
                 duration_ms: p.duration_ms,
                 phrase_length_ms: (60_000.0 / p.tempo.bpm * 16.0) as u64,
+                genre: class.genre,
+                subgenre: class.subgenre,
+                mood: class.mood,
+                vibe: class.vibe,
+                mix_notes: class.mix_notes,
+                spectral_centroid: p.spectral.as_ref().map(|s| s.centroid),
+                vocal_presence: p.vocal_presence,
+                danceability: p.rhythm.as_ref().map(|r| r.danceability),
+                energy_trajectory: p.energy_trajectory.clone(),
+                intro_length_ms: p.intro_length_ms,
+                outro_length_ms: p.outro_length_ms,
             }
         })
         .collect();
@@ -155,5 +222,6 @@ pub fn build_context(input: &ContextInput) -> AiContext {
         preferences,
         constraints,
         available_tracks,
+        set_flow: input.set_flow.clone(),
     }
 }

@@ -95,7 +95,8 @@ function LibraryView() {
                     <span>BPM</span>
                     <span>Groove</span>
                     <span>Key</span>
-                    <span>Vol</span>
+                    <span>Genre</span>
+                    <span>Mood</span>
                     <span>Duration</span>
                     <span>Status</span>
                 </div>
@@ -129,10 +130,11 @@ function LibraryView() {
                                 <span className="track-duration">
                                     {track.key || "—"}
                                 </span>
-                                <span className="track-duration" style={{
-                                    color: track.lufs ? (track.lufs > -10 ? "var(--status-error)" : track.lufs < -18 ? "var(--status-pending)" : "var(--text-secondary)") : "var(--text-muted)"
-                                }}>
-                                    {track.lufs ? `${track.lufs.toFixed(1)}` : "—"}
+                                <span className="track-duration">
+                                    {track.genre ? <span className="genre-badge">{track.genre}</span> : "—"}
+                                </span>
+                                <span className="track-duration">
+                                    {track.mood ? <span className="mood-badge">{track.mood}</span> : "—"}
                                 </span>
                                 <span className="track-duration">
                                     {track.duration_ms ? formatTime(track.duration_ms) : "—"}
@@ -833,9 +835,21 @@ function sliderToFilter(val: number): number {
 // ─── DJ View ─────────────────────────────────────────────────────
 
 function DJView() {
-    const { engineState, setCrossfader } = useStore();
+    const { engineState, setCrossfader, isRecording, recordingStartTime, startRecording, stopRecording } = useStore();
 
     const masterBpm = engineState?.master_bpm ?? 128;
+
+    const [recordingElapsed, setRecordingElapsed] = useState(0);
+    useEffect(() => {
+        if (!isRecording || !recordingStartTime) return;
+        const interval = setInterval(() => {
+            setRecordingElapsed(Math.floor((Date.now() - recordingStartTime) / 1000));
+        }, 1000);
+        return () => clearInterval(interval);
+    }, [isRecording, recordingStartTime]);
+
+    const recMinutes = Math.floor(recordingElapsed / 60);
+    const recSeconds = recordingElapsed % 60;
 
     return (
         <div className="dj-view">
@@ -850,14 +864,25 @@ function DJView() {
                     <span>CROSSFADER</span>
                     <span>B</span>
                 </div>
-                <input
-                    type="range"
-                    className="crossfader-slider"
-                    min={-100}
-                    max={100}
-                    value={(engineState?.crossfader ?? 0) * 100}
-                    onChange={(e) => setCrossfader(Number(e.target.value) / 100)}
-                />
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <input
+                        type="range"
+                        className="crossfader-slider"
+                        min={-100}
+                        max={100}
+                        value={(engineState?.crossfader ?? 0) * 100}
+                        onChange={(e) => setCrossfader(Number(e.target.value) / 100)}
+                        style={{ flex: 1 }}
+                    />
+                    <button
+                        className={`rec-button ${isRecording ? "rec-active" : ""}`}
+                        onClick={isRecording ? stopRecording : startRecording}
+                        title={isRecording ? "Stop Recording" : "Start Recording"}
+                    >
+                        <span className="rec-dot" />
+                        {isRecording ? `${recMinutes}:${String(recSeconds).padStart(2, "0")}` : "REC"}
+                    </button>
+                </div>
             </div>
 
             <div style={{ display: "flex", gap: "20px" }}>

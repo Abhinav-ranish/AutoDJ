@@ -140,6 +140,20 @@ pub async fn load_track(
         }
     }
 
+    // Record track play in session history
+    {
+        let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+        let mut session = state.current_session_id.write().map_err(|_| "Session lock error")?;
+        if session.is_none() {
+            if let Ok(sid) = db.create_session() {
+                *session = Some(sid);
+            }
+        }
+        if let Some(ref sid) = *session {
+            let _ = db.record_track_play(sid, &track_id, None, None);
+        }
+    }
+
     // Also send a Play command right away
     state.send_command(Command::Play { deck: deck_id }, CommandSource::User);
 
@@ -418,63 +432,113 @@ pub async fn set_ai_config(config: AiConfig, state: State<'_, AppState>) -> Resu
 /// Request the next track from the AI Planner.
 #[tauri::command]
 pub async fn request_next_track(state: State<'_, AppState>) -> Result<AiDecision, String> {
-    // 1. Get engine properties snapshot
     let snapshot = state.latest_state().ok_or("Engine state unavailable")?;
-    
-    // 2. Fetch tracks and lock DB to assemble AiContext
-    let (playing_profile, avail_profiles, avail_metadata) = {
+
+    let (playing_profile, playing_artist, playing_title, avail_profiles, avail_metadata, classifications, recent_tracks) = {
         let db = state.db.lock().map_err(|e| format!("DB Lock error: {e}"))?;
         let tracks = db.get_all_tracks().map_err(|e| format!("DB error: {e}"))?;
-        
+
         let mut profiles = Vec::new();
         let mut metadata = std::collections::HashMap::new();
 
+        // Try to find the currently playing track by deck track_id
         let deck_a_playing = snapshot.deck_a.state == "playing";
-        let _playing_id = if deck_a_playing { "UNKNOWN_A" } else { "UNKNOWN_B" }; // TODO track currently loaded ID natively
+        let playing_id = if deck_a_playing {
+            snapshot.deck_a.track_id.clone()
+        } else {
+            snapshot.deck_b.track_id.clone()
+        };
 
         let mut current_profile = None;
+        let mut cur_artist = "Unknown".to_string();
+        let mut cur_title = "Unknown".to_string();
 
-        for track in tracks {
+        for track in &tracks {
             if let Ok(Some(json)) = db.get_track_profile_json(&track.id) {
                 if let Ok(profile) = serde_json::from_str::<autodj_analysis::profile::TrackProfile>(&json) {
-                    metadata.insert(track.id.clone(), (
-                        track.artist.clone().unwrap_or_else(|| "Unknown".to_string()),
-                        track.title.clone().unwrap_or_else(|| "Unknown".to_string())
-                    ));
-                    
-                    // Hack for demonstration: just pick the first track as playing if none specified
-                    if current_profile.is_none() {
+                    let artist = track.artist.clone().unwrap_or_else(|| "Unknown".to_string());
+                    let title = track.title.clone().unwrap_or_else(|| "Unknown".to_string());
+                    metadata.insert(track.id.clone(), (artist.clone(), title.clone()));
+
+                    if playing_id.as_deref() == Some(&track.id) {
                         current_profile = Some(profile.clone());
+                        cur_artist = artist;
+                        cur_title = title;
                     }
 
                     profiles.push(profile);
                 }
             }
         }
-        
+
+        // Fallback: use first profile if playing track not identified
+        if current_profile.is_none() {
+            if let Some(first) = profiles.first() {
+                current_profile = Some(first.clone());
+                if let Some((a, t)) = metadata.get(&first.track_id) {
+                    cur_artist = a.clone();
+                    cur_title = t.clone();
+                }
+            }
+        }
+
         let p = current_profile.ok_or("No current track profile found!")?;
-        (p, profiles, metadata)
+
+        // Load classifications
+        let mut class_map = std::collections::HashMap::new();
+        if let Ok(class_rows) = db.get_all_classifications() {
+            for (tid, genre, subgenre, mood, vibe, mix_notes) in class_rows {
+                class_map.insert(tid, autodj_ai::context::TrackClassificationData {
+                    genre: Some(genre),
+                    subgenre: Some(subgenre),
+                    mood: Some(mood),
+                    vibe: Some(vibe),
+                    mix_notes: Some(mix_notes),
+                });
+            }
+        }
+
+        // Get recent track history for variety scoring
+        let recent = db.get_recent_track_ids(10).unwrap_or_default();
+
+        (p, cur_artist, cur_title, profiles, metadata, class_map, recent)
     };
-    
-    // 3. Assemble Context
+
     let context = build_context(&autodj_ai::context::ContextInput {
         engine_state: &snapshot,
         playing_track_profile: &playing_profile,
-        playing_artist: "Artist",
-        playing_title: "Title",
+        playing_artist: &playing_artist,
+        playing_title: &playing_title,
         available_profiles: &avail_profiles,
         intent: "maintain",
         target_energy: 0.5,
-        recent_tracks: &[],
+        recent_tracks: &recent_tracks,
         available_metadata: &avail_metadata,
+        classifications: &classifications,
+        set_flow: None,
     });
 
-    // 4. Await LLM AI Plan
     let planner = state.ai_planner.read().await;
-    let decision = planner.plan_next(&context, &playing_profile, &avail_profiles)
+    let decision = planner.plan_next(&context, &playing_profile, &avail_profiles, &classifications)
         .await
         .map_err(|e| format!("AI Planning Error: {e}"))?;
-    
+
+    // Record the decision in mix history if a track was selected
+    if let Some(ref track_id) = decision.track_selection {
+        let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+        let session_id = state.current_session_id.read()
+            .map_err(|_| "Session lock error".to_string())?;
+        if let Some(ref sid) = *session_id {
+            let decision_json = serde_json::to_string(&decision).ok();
+            let _ = db.record_track_play(
+                sid,
+                track_id,
+                decision.transition_plan.as_ref().map(|t| t.template_name.as_str()),
+                decision_json.as_deref(),
+            );
+        }
+    }
+
     Ok(decision)
 }
 
@@ -627,8 +691,70 @@ pub async fn classify_track(
 pub fn clear_library(state: State<'_, AppState>) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
     db.clear_all_tracks().map_err(|e| format!("DB: {e}"))?;
-    
+
     state.cache.clear_all().map_err(|e| format!("Cache: {e}"))?;
+    Ok(())
+}
+
+/// Start recording the master output to a WAV file.
+#[tauri::command]
+pub fn start_recording(filename: String, state: State<'_, AppState>) -> Result<(), String> {
+    use autodj_core::recorder::WavWriter;
+    use std::sync::atomic::Ordering;
+
+    // Check if already recording
+    if state.recording_flag.load(Ordering::Relaxed) {
+        return Err("Already recording".to_string());
+    }
+
+    // Take the consumer out of state (can only record once at a time)
+    let consumer = state.record_consumer
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))?
+        .take()
+        .ok_or("Recording consumer not available (already in use?)")?;
+
+    // Build output path in data_dir/recordings/
+    let recordings_dir = state.data_dir.join("recordings");
+    std::fs::create_dir_all(&recordings_dir)
+        .map_err(|e| format!("Failed to create recordings dir: {e}"))?;
+    let output_path = recordings_dir.join(&filename);
+
+    let flag = state.recording_flag.clone();
+    let sample_rate = state.sample_rate;
+
+    // Set recording flag BEFORE spawning thread
+    flag.store(true, Ordering::Relaxed);
+
+    // Spawn writer thread
+    std::thread::spawn(move || {
+        let writer = WavWriter::new(output_path, sample_rate);
+        match writer.run(consumer, flag) {
+            Ok(path) => log::info!("Recording saved to: {}", path.display()),
+            Err(e) => log::error!("Recording failed: {e}"),
+        }
+    });
+
+    Ok(())
+}
+
+/// Stop recording and finalize the WAV file.
+#[tauri::command]
+pub fn stop_recording(state: State<'_, AppState>) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
+    if !state.recording_flag.load(Ordering::Relaxed) {
+        return Err("Not currently recording".to_string());
+    }
+
+    // Clear the flag - the writer thread will drain remaining samples and exit
+    state.recording_flag.store(false, Ordering::Relaxed);
+
+    // Note: The consumer was moved to the writer thread in start_recording.
+    // It will be dropped when the writer thread finishes.
+    // Recording can only happen once per app session (consumer is consumed).
+    // A future improvement could recreate the ring buffer pair.
+
     Ok(())
 }
 

@@ -427,6 +427,99 @@ impl Database {
         Ok(())
     }
 
+    /// Get classification data for all tracks that have been classified.
+    pub fn get_all_classifications(&self) -> Result<Vec<(String, String, String, String, String, String)>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT track_id, genre, subgenre, mood, vibe, mix_notes FROM track_profiles WHERE genre IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
+    }
+
+    /// Create a new session. Returns the session ID.
+    pub fn create_session(&self) -> Result<String, DbError> {
+        let id = format!("ses_{:012x}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() & 0xFFFFFFFFFFFF);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "INSERT INTO sessions (id, started_at) VALUES (?1, ?2)",
+            params![id, now],
+        )?;
+        Ok(id)
+    }
+
+    /// End a session.
+    pub fn end_session(&self, session_id: &str) -> Result<(), DbError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "UPDATE sessions SET ended_at=?2 WHERE id=?1",
+            params![session_id, now],
+        )?;
+        Ok(())
+    }
+
+    /// Record a track play in mix history.
+    pub fn record_track_play(
+        &self,
+        session_id: &str,
+        track_id: &str,
+        transition_type: Option<&str>,
+        ai_decision_json: Option<&str>,
+    ) -> Result<(), DbError> {
+        let id = format!("mix_{:012x}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() & 0xFFFFFFFFFFFF);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "INSERT INTO mix_history (id, track_id, started_at, transition_type, ai_decision_json, session_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, track_id, now, transition_type, ai_decision_json, session_id],
+        )?;
+        // Update session track count
+        self.conn.execute(
+            "UPDATE sessions SET track_count = track_count + 1 WHERE id = ?1",
+            params![session_id],
+        )?;
+        Ok(())
+    }
+
+    /// Get the most recently played track IDs.
+    pub fn get_recent_track_ids(&self, limit: usize) -> Result<Vec<String>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT track_id FROM mix_history ORDER BY started_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| row.get(0))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?);
+        }
+        Ok(ids)
+    }
+
     /// Get a track profile as JSON string.
     pub fn get_track_profile_json(&self, track_id: &str) -> Result<Option<String>, DbError> {
         let mut stmt = self.conn.prepare("SELECT profile_json FROM track_profiles WHERE track_id = ?1")?;
