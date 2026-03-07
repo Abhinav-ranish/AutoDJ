@@ -57,6 +57,7 @@ pub fn run() {
             commands::classify_track,
             commands::start_recording,
             commands::stop_recording,
+            commands::get_album_art,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

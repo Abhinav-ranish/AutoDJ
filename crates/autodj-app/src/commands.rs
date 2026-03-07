@@ -44,6 +44,7 @@ pub async fn import_files(
             .and_then(|s| s.to_str())
             .map(|s| s.to_string());
         let mut artist = None;
+        let mut album_art_data: Option<Vec<u8>> = None;
 
         if let Ok(tagged_file) = lofty::read_from_path(&path) {
             if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
@@ -53,6 +54,10 @@ pub async fn import_files(
                 if let Some(a) = tag.artist().as_deref() {
                     artist = Some(a.to_string());
                 }
+                // Extract album art
+                if let Some(picture) = tag.pictures().first() {
+                    album_art_data = Some(picture.data().to_vec());
+                }
             }
         }
 
@@ -60,6 +65,14 @@ pub async fn import_files(
         let track_id = db
             .insert_track(&file_hash, path_str, title.as_deref(), artist.as_deref())
             .map_err(|e| format!("DB insert: {e}"))?;
+
+        // Save album art to cache
+        if let Some(art_data) = album_art_data {
+            let art_path = state.cache.art_path(&track_id);
+            if let Err(e) = std::fs::write(&art_path, &art_data) {
+                log::warn!("Failed to save album art for {}: {}", track_id, e);
+            }
+        }
 
         // Copy original file
         state
@@ -756,5 +769,15 @@ pub fn stop_recording(state: State<'_, AppState>) -> Result<(), String> {
     // A future improvement could recreate the ring buffer pair.
 
     Ok(())
+}
+
+/// Get the album art path for a track, if it exists.
+#[tauri::command]
+pub fn get_album_art(track_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    if state.cache.art_exists(&track_id) {
+        Ok(Some(state.cache.art_path(&track_id).to_string_lossy().to_string()))
+    } else {
+        Ok(None)
+    }
 }
 

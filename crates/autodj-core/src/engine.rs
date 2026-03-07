@@ -9,6 +9,7 @@ use crate::buffer::TrackBuffer;
 use crate::command::{Command, CommandSource, CommandValidator, DeckId, SchedulePoint, ScheduledCommand};
 use crate::deck::Deck;
 use crate::mixer::Mixer;
+use crate::recorder::{RecordProducer, RecordingFlag};
 use crate::transport::TransportClock;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -19,6 +20,7 @@ use ringbuf::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 /// Size of the command ring buffer (max commands in flight).
 const COMMAND_RING_SIZE: usize = 256;
@@ -187,7 +189,12 @@ pub struct AudioEngine {
 
 impl AudioEngine {
     /// Create and start the audio engine with default output device.
-    pub fn new(track_load_receiver: TrackLoadReceiver) -> Result<(Self, Stream), String> {
+    /// Optionally accepts a recording producer + flag for WAV capture.
+    pub fn new(
+        track_load_receiver: TrackLoadReceiver,
+        record_producer: Option<RecordProducer>,
+        recording_flag: Option<RecordingFlag>,
+    ) -> Result<(Self, Stream), String> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -221,6 +228,10 @@ impl AudioEngine {
 
         // Track load receiver (moved into the audio callback)
         let mut track_loader = track_load_receiver;
+
+        // Recording state (moved into the audio callback)
+        let mut rec_producer = record_producer;
+        let rec_flag = recording_flag;
 
         let config = supported_config.config();
 
@@ -305,6 +316,16 @@ impl AudioEngine {
                             }
                         } else if channels == 1 {
                             frame[0] = (l + r) * 0.5;
+                        }
+
+                        // Recording tap: push stereo samples to ring buffer
+                        if let Some(ref flag) = rec_flag {
+                            if flag.load(Ordering::Relaxed) {
+                                if let Some(ref mut prod) = rec_producer {
+                                    let _ = prod.try_push(l);
+                                    let _ = prod.try_push(r);
+                                }
+                            }
                         }
 
                         transport.advance();
