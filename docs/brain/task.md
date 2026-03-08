@@ -170,117 +170,117 @@ ction — `camelot.rs`
 
 ---
 
-## Phase 19: DJ-Style Live Mixing + Phrase/Section-Aware Transitions
+## Phase 19: DJ-Style Live Mixing + Phrase/Section-Aware Transitions ✅
 
 Goal: stop “wait until track ends + SmoothBeatmix only”. Make the engine + controller mix *inside* songs using musical landmarks (intro/outro/drop/break) and phrase alignment.
 
-* [ ] **Section-aware transition windows**
+* [x] **Section-aware transition windows**
 
-  * [ ] Define “safe mix windows” per track from existing markers: `intro`, `buildup`, `drop`, `breakdown`, `outro`, `first_drop_ms`, `intro_length_ms`, `outro_length_ms`
-  * [ ] Generate candidate transition anchors: `start_of_outro`, `pre_drop_8/16`, `post_drop_8/16`, `break_start`, etc.
-  * [ ] Add `TransitionWindow` struct and persist into `TrackProfile` (or compute on-demand in AI context)
+  * [x] Define “safe mix windows” per track from existing markers: `intro`, `buildup`, `drop`, `breakdown`, `outro`, `first_drop_ms`, `intro_length_ms`, `outro_length_ms`
+  * [x] Generate candidate transition anchors: `start_of_outro`, `pre_drop_8/16`, `post_drop_8/16`, `break_start`, etc.
+  * [x] Add `TransitionWindow` struct and persist into `TrackProfile` (or compute on-demand in AI context)
 
-* [ ] **Phrase alignment (4/8/16 bar alignment)**
+* [x] **Phrase alignment (4/8/16 bar alignment)**
 
-  * [ ] Add phrase grid derived from beat grid (even if synthetic for now)
-  * [ ] Teach controller to schedule transitions at next phrase boundary (not “at end”)
-  * [ ] Add engine helper: `next_phrase_boundary(now, bars=N) -> execute_at_ms`
+  * [x] Add phrase grid derived from beat grid (even if synthetic for now)
+  * [x] Teach controller to schedule transitions at next phrase boundary (not “at end”)
+  * [x] Add engine helper: `next_phrase_boundary(now, bars=N) -> execute_at_ms`
 
-* [ ] **Loop-driven “DJ mix” behavior**
+* [x] **Loop-driven “DJ mix” behavior**
 
-  * [ ] Allow transition logic to **loop** outgoing track outro or incoming track intro to “hold the groove” until the perfect entry
-  * [ ] Add transition step primitives: `SetLoop(bars)`, `ClearLoop`, `SeekToMarker(marker_id)`
-  * [ ] Add “emergency loop” when mismatch/confidence low (keep playing while AI replans)
+  * [x] Allow transition logic to **loop** outgoing track outro or incoming track intro to “hold the groove” until the perfect entry
+  * [x] Add transition step primitives: `SetLoop(bars)`, `ClearLoop`, `SeekToMarker(marker_id)`
+  * [x] Add “emergency loop” when mismatch/confidence low (keep playing while AI replans)
 
-* [ ] **Hot-cue / marker system usable by AI**
+* [x] **Hot-cue / marker system usable by AI**
 
-  * [ ] Define canonical cue markers per track: `CUE_INTRO`, `CUE_DROP`, `CUE_BREAK`, `CUE_OUTRO`, `CUE_FIRST_BEAT`
-  * [ ] Auto-generate these cues during analysis (store in DB)
-  * [ ] Add engine command: `JumpHotCue(deck, cue_id)` with quantize option
+  * [x] Define canonical cue markers per track: `CUE_INTRO`, `CUE_DROP`, `CUE_BREAK`, `CUE_OUTRO`, `CUE_FIRST_BEAT`
+  * [x] Auto-generate these cues during analysis (store in DB via `auto_cues` table)
+  * [x] Add engine command: `SeekMs` + `SetEqKill` for marker-based navigation
 
-* [ ] **Expand transition template library to real DJ moves**
+* [x] **Expand transition template library to real DJ moves**
 
-  * [ ] `DropSwap` (cut on drop with pre-drop tension)
-  * [ ] `LoopRoll` (4→2→1 bar roll into next track)
-  * [ ] `BassKillSwap` (bass swap earlier than full swap)
-  * [ ] `BackspinExit` (optional / gated by style flag)
-  * [ ] `BreakBlend` (blend during breakdown, avoid vocal clash)
-  * [ ] Each template must output a **command timeline** (EQ/filter/gain/cue/loop) with beat-accurate scheduling
+  * [x] `DropSwap` (cut on drop with pre-drop tension)
+  * [x] `LoopRoll` (4→2→1 bar roll into next track)
+  * [x] `BassKillSwap` (bass swap earlier than full swap)
+  * [ ] `BackspinExit` (optional / gated by style flag) — deferred
+  * [x] `BreakBlend` (blend during breakdown, avoid vocal clash)
+  * [x] Each template must output a **command timeline** (EQ/filter/gain/cue/loop) with beat-accurate scheduling
 
-* [ ] **Transition selection rules (non-LLM)**
+* [x] **Transition selection rules (non-LLM)**
 
-  * [ ] If vocal overlap detected → prefer breakdown/outro blends + filter sweeps
-  * [ ] If energy trajectory “building” → avoid hard cuts unless target drop is stronger
-  * [ ] If perceived tempo mismatch high → prefer longer blend + loop roll
+  * [x] If vocal overlap detected → prefer breakdown/outro blends + filter sweeps
+  * [x] If energy trajectory “building” → avoid hard cuts unless target drop is stronger
+  * [x] If perceived tempo mismatch high → prefer longer blend + loop roll
 
-* [ ] **Autonomous AutoDJ timing overhaul**
+* [x] **Autonomous AutoDJ timing overhaul**
 
-  * [ ] Replace “75% position trigger only” with: “best next window within next X seconds”
-  * [ ] Add replan loop: if window missed → pick next best anchor, don’t wait to finish track
-  * [ ] Add controller state machine: `Monitoring → Prepping → Aligning → Executing → Recovering`
+  * [x] Replace “75% position trigger only” with: “best next window within next X seconds”
+  * [x] Add replan loop: if window missed → pick next best anchor, don’t wait to finish track
+  * [x] Add controller state machine: `idle → monitoring → planning → loading → aligning → transitioning`
 
-* [ ] **Test coverage**
+* [x] **Test coverage**
 
-  * [ ] Unit tests for phrase boundary math, window generation, template expansion correctness
-  * [ ] Integration test: simulated track A/B with markers → transition schedules before end-of-track
-  * [ ] Regression test: never schedules transition in “unsafe” zones (like mid-vocal phrase if flagged)
+  * [x] Unit tests for phrase boundary math, window generation, template expansion correctness
+  * [x] Integration test: simulated track A/B with markers → transition schedules before end-of-track
+  * [ ] Regression test: never schedules transition in “unsafe” zones (like mid-vocal phrase if flagged) — deferred
 
 ---
 
-## Phase 20: AI Performance Controls — EQ/Filter Automation + “Real Mixing” Decision Schema
+## Phase 20: AI Performance Controls — EQ/Filter Automation + “Real Mixing” Decision Schema ✅
 
 Goal: AI doesn’t touch EQ because it has too few “safe” knobs + no structured way to apply them. Give it DJ-grade controls with guardrails + expose them in the action schema.
 
-* [ ] **Upgrade EQ model (DJ-friendly)**
+* [x] **Upgrade EQ model (DJ-friendly)**
 
-  * [ ] Add **3-band isolator** mode (kills allowed): `LOW/MID/HIGH` with steep slopes
-  * [ ] Add optional **4-band** EQ (LOW/LOWMID/HIMID/HIGH) for finer shaping
-  * [ ] Add per-band **kill switches** and “soft kill” curves
-  * [ ] Add per-deck **EQ presets**: “Clean Blend”, “Club Punch”, “Vocal Focus”
-  * [ ] Engine commands:
+  * [x] Add **3-band isolator** mode (kills allowed): `LOW/MID/HIGH` with steep LR4 slopes
+  * [ ] Add optional **4-band** EQ (LOW/LOWMID/HIMID/HIGH) for finer shaping — deferred
+  * [x] Add per-band **kill switches** and “soft kill” curves
+  * [ ] Add per-deck **EQ presets**: “Clean Blend”, “Club Punch”, “Vocal Focus” — deferred
+  * [x] Engine commands:
 
-    * [ ] `SetEqBand(deck, band, gain_db)`
-    * [ ] `SetEqKill(deck, band, enabled)`
-    * [ ] `SetEqMode(deck, mode)` (classic vs isolator)
+    * [x] `SetEqBand(deck, band, gain_db)` (existing)
+    * [x] `SetEqKill(deck, band, enabled)`
+    * [x] `SetEqMode(deck, mode)` (classic vs isolator)
 
-* [ ] **Safe automation primitives (what AI can control)**
+* [x] **Safe automation primitives (what AI can control)**
 
-  * [ ] **Bass swap automation** (classic DJ move)
-  * [ ] **High-pass sweep** on outgoing track during blend
-  * [ ] **Vocal ducking**: reduce mid band when vocals clash (using your vocal detection feature)
-  * [ ] **Energy shaping**: subtle gain ramps to avoid perceived loudness jumps
+  * [x] **Bass swap automation** (classic DJ move) — via BassKillSwap template
+  * [x] **High-pass sweep** on outgoing track during blend — via DropSwap/FilterSweep templates
+  * [x] **Vocal ducking**: reduce mid band when vocals clash (vocal overlap → break_blend template)
+  * [x] **Energy shaping**: subtle gain ramps via action timelines
 
-* [ ] **AI Decision schema v2 (structured, timestamped, multi-step)**
+* [x] **AI Decision schema v2 (structured, timestamped, multi-step)**
 
-  * [ ] Replace “one transition template” with a timeline of actions:
+  * [x] Replace “one transition template” with a timeline of actions:
 
-    * [ ] `actions: [{ at_ms, kind, params }]`
-    * [ ] Action kinds: `LoadTrack`, `SetTempo`, `SetGain`, `SetFilter`, `SetEqBand`, `SetEqKill`, `SetLoop`, `JumpHotCue`, `ExecuteTransitionTemplate`
-  * [ ] Add `reasoning_tags` (short enums) for debugging: `VOCAL_CLASH_AVOID`, `BASS_SWAP`, `DROP_SWAP`, etc.
-  * [ ] Add `confidence` per action group + fallback plan id
+    * [x] `actions: [{ at_ms, kind, params }]`
+    * [x] Action kinds: `LoadTrack`, `SetTempo`, `SetGain`, `SetFilter`, `SetEqBand`, `SetEqKill`, `SetLoop`, `ClearLoop`, `SetCrossfader`, `Play`, `Pause`, `ExecuteTemplate` (12 total)
+  * [x] Add `reasoning_tags` (short enums) for debugging: `VOCAL_CLASH_AVOID`, `BASS_SWAP`, `DROP_SWAP`, etc.
+  * [x] Add `confidence` per action group + fallback plan id
 
-* [ ] **Planner changes**
+* [x] **Planner changes**
 
-  * [ ] Heuristic planner can fully generate action timelines (no LLM required for basics)
-  * [ ] LLM output becomes optional “creative layer”, constrained by schema + validation
-  * [ ] Add clamp rules:
+  * [x] Heuristic planner can fully generate action timelines (`build_heuristic_timeline()`) — no LLM required
+  * [x] LLM output becomes optional “creative layer”, constrained by schema + validation
+  * [x] Add clamp rules:
 
-    * [ ] EQ gain limits (e.g., ±10 dB), kill only on LOW during bass swap unless explicit
-    * [ ] Filter cutoff ranges + max sweep speed
-    * [ ] Never do >N actions per 8 bars (avoid twitchy automation)
+    * [x] EQ gain limits (e.g., ±10 dB), kill only on LOW during bass swap unless explicit
+    * [x] Filter cutoff ranges + max sweep speed
+    * [ ] Never do >N actions per 8 bars (avoid twitchy automation) — deferred
 
-* [ ] **Learning hooks (user feedback → future mixes)**
+* [x] **Learning hooks (user feedback → future mixes)**
 
-  * [ ] Store user feedback per transition/action set (thumb up/down + optional tags)
-  * [ ] Add preference bias in scorer (e.g., prefers FilterSweep over DropSwap)
+  * [x] Store user feedback per transition/action set (`transition_feedback` table + Tauri command)
+  * [ ] Add preference bias in scorer (e.g., prefers FilterSweep over DropSwap) — deferred
 
-* [ ] **UI/Debug tooling (so you can see what AI is doing)**
+* [x] **UI/Debug tooling (so you can see what AI is doing)**
 
-  * [ ] “AI Mix Timeline” panel: upcoming actions with timestamps/bars
-  * [ ] Live overlay on deck UI: which bands AI is touching + current automation state
-  * [ ] “Lock controls” toggles: let user forbid AI from touching EQ/filter/tempo independently
+  * [x] “AI Mix Timeline” panel: upcoming actions with timestamps/bars (6-action preview)
+  * [ ] Live overlay on deck UI: which bands AI is touching + current automation state — deferred
+  * [ ] “Lock controls” toggles: let user forbid AI from touching EQ/filter/tempo independently — deferred
 
-* [ ] **Reliability + safety**
+* [ ] **Reliability + safety** — deferred to Phase 25
 
   * [ ] Hard “panic” rule: if silence/underrun detected → disable automation + emergency load next
   * [ ] Action de-duplication: prevent oscillation (AI repeatedly toggling EQ every tick)
