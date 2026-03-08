@@ -27,6 +27,11 @@ pub struct TrackProfile {
     pub outro_length_ms: Option<u64>,
     pub first_drop_ms: Option<u64>,
 
+    // Phase 19: transition windows, phrase grid, auto-cues
+    pub transition_windows: Vec<TransitionWindow>,
+    pub phrases: Option<PhraseInfo>,
+    pub auto_cues: Vec<AutoCue>,
+
     pub duration_ms: u64,
     pub sample_rate: u32,
     pub channels: u16,
@@ -143,4 +148,39 @@ pub struct WaveformInfo {
     pub peaks_file: String,
     pub samples_per_pixel: u32,
     pub channels: u16,
+}
+
+// ─── Phase 19: Transition Windows & Phrase Grid ─────────────────
+
+/// A candidate time window where a transition can safely start.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransitionWindow {
+    /// Human-readable anchor type, e.g. "outro_start", "pre_drop_16", "break_start".
+    pub anchor: String,
+    /// Start of the window in milliseconds.
+    pub start_ms: u64,
+    /// End of the window in milliseconds.
+    pub end_ms: u64,
+    /// Confidence / quality score (0.0–1.0).
+    pub score: f64,
+}
+
+/// Phrase grid derived from beat grid (4/8/16 bar phrase boundaries).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhraseInfo {
+    /// Length of one phrase in bars (typically 8 or 16).
+    pub phrase_bars: u32,
+    /// Absolute ms positions of each phrase boundary.
+    pub boundaries_ms: Vec<u64>,
+}
+
+/// A canonical cue marker auto-generated during analysis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoCue {
+    /// Canonical type: "intro", "drop", "break", "outro", "first_beat".
+    pub cue_type: String,
+    /// Position in milliseconds.
+    pub position_ms: u64,
+    /// Confidence (0.0–1.0).
+    pub confidence: f64,
 }

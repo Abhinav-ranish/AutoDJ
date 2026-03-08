@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use autodj_core::buffer::TrackBuffer;
-use autodj_core::command::{Command, CommandSource, DeckId, EqBand};
+use autodj_core::command::{Command, CommandSource, DeckId, EqBand, EqMode};
 use autodj_core::engine::EngineStateSnapshot;
 use autodj_storage::cache::hash_file;
 use autodj_storage::db::{TrackRecord, ImportStatus};
@@ -779,5 +779,68 @@ pub fn get_album_art(track_id: String, state: State<'_, AppState>) -> Result<Opt
     } else {
         Ok(None)
     }
+}
+
+/// Set EQ kill switch for a deck band.
+#[tauri::command]
+pub fn set_eq_kill(deck: DeckId, band: EqBand, enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.send_command(
+        Command::SetEqKill { deck, band, enabled },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Set EQ mode (classic/isolator) for a deck.
+#[tauri::command]
+pub fn set_eq_mode(deck: DeckId, mode: EqMode, state: State<'_, AppState>) -> Result<(), String> {
+    state.send_command(
+        Command::SetEqMode { deck, mode },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Seek a deck to exact millisecond position.
+#[tauri::command]
+pub fn seek_ms(deck: DeckId, position_ms: u64, state: State<'_, AppState>) -> Result<(), String> {
+    state.send_command(
+        Command::SeekMs { deck, position_ms },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Get auto-cues for a track from DB.
+#[tauri::command]
+pub fn get_auto_cues(track_id: String, state: State<'_, AppState>) -> Result<Vec<(String, u64, f64)>, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.get_auto_cues(&track_id).map_err(|e| format!("DB error: {e}"))
+}
+
+/// Submit feedback about a transition.
+#[tauri::command]
+pub fn submit_transition_feedback(
+    from_track_id: String,
+    to_track_id: String,
+    template_used: String,
+    rating: i32,
+    notes: Option<String>,
+    decision_json: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    let session_id = state.current_session_id.read()
+        .map_err(|_| "Session lock error".to_string())?;
+    let sid = session_id.as_deref().unwrap_or("unknown");
+    db.save_transition_feedback(
+        sid,
+        &from_track_id,
+        &to_track_id,
+        &template_used,
+        rating,
+        notes.as_deref(),
+        decision_json.as_deref(),
+    ).map_err(|e| format!("DB error: {e}"))
 }
 

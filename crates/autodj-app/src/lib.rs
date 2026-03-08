@@ -58,6 +58,11 @@ pub fn run() {
             commands::start_recording,
             commands::stop_recording,
             commands::get_album_art,
+            commands::set_eq_kill,
+            commands::set_eq_mode,
+            commands::seek_ms,
+            commands::get_auto_cues,
+            commands::submit_transition_feedback,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

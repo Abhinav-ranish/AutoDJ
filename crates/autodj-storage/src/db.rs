@@ -201,6 +201,26 @@ impl Database {
                 label       TEXT,
                 PRIMARY KEY (track_id, cue_index)
             );
+
+            CREATE TABLE IF NOT EXISTS auto_cues (
+                track_id    TEXT NOT NULL REFERENCES tracks(id),
+                cue_type    TEXT NOT NULL,
+                position_ms INTEGER NOT NULL,
+                confidence  REAL NOT NULL DEFAULT 1.0,
+                PRIMARY KEY (track_id, cue_type)
+            );
+
+            CREATE TABLE IF NOT EXISTS transition_feedback (
+                id              TEXT PRIMARY KEY,
+                session_id      TEXT NOT NULL,
+                from_track_id   TEXT NOT NULL,
+                to_track_id     TEXT NOT NULL,
+                template_used   TEXT NOT NULL,
+                rating          INTEGER NOT NULL,
+                notes           TEXT,
+                decision_json   TEXT,
+                created_at      INTEGER NOT NULL
+            );
             ",
         )?;
 
@@ -600,11 +620,75 @@ impl Database {
     pub fn clear_all_tracks(&self) -> Result<(), DbError> {
         self.conn.execute_batch(
             "
+            DELETE FROM auto_cues;
+            DELETE FROM transition_feedback;
             DELETE FROM hot_cues;
             DELETE FROM mix_history;
             DELETE FROM track_profiles;
             DELETE FROM tracks;
             "
+        )?;
+        Ok(())
+    }
+
+    /// Save auto-cues for a track (replaces any existing).
+    pub fn save_auto_cues(
+        &self,
+        track_id: &str,
+        cues: &[(String, u64, f64)], // (cue_type, position_ms, confidence)
+    ) -> Result<(), DbError> {
+        self.conn.execute(
+            "DELETE FROM auto_cues WHERE track_id = ?1",
+            params![track_id],
+        )?;
+        for (cue_type, position_ms, confidence) in cues {
+            self.conn.execute(
+                "INSERT INTO auto_cues (track_id, cue_type, position_ms, confidence)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![track_id, cue_type, *position_ms as i64, confidence],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Get auto-cues for a track.
+    pub fn get_auto_cues(&self, track_id: &str) -> Result<Vec<(String, u64, f64)>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT cue_type, position_ms, confidence FROM auto_cues WHERE track_id = ?1 ORDER BY position_ms",
+        )?;
+        let rows = stmt.query_map(params![track_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64, row.get::<_, f64>(2)?))
+        })?;
+        let mut cues = Vec::new();
+        for row in rows {
+            cues.push(row?);
+        }
+        Ok(cues)
+    }
+
+    /// Save transition feedback for a mix.
+    pub fn save_transition_feedback(
+        &self,
+        session_id: &str,
+        from_track_id: &str,
+        to_track_id: &str,
+        template_used: &str,
+        rating: i32,
+        notes: Option<&str>,
+        decision_json: Option<&str>,
+    ) -> Result<(), DbError> {
+        let id = format!("fb_{:012x}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() & 0xFFFFFFFFFFFF);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "INSERT INTO transition_feedback (id, session_id, from_track_id, to_track_id, template_used, rating, notes, decision_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![id, session_id, from_track_id, to_track_id, template_used, rating, notes, decision_json, now],
         )?;
         Ok(())
     }

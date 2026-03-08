@@ -1,6 +1,6 @@
 //! Builder for the AI context payload.
 
-use autodj_analysis::profile::TrackProfile;
+use autodj_analysis::profile::{AutoCue, TrackProfile, TransitionWindow};
 use autodj_core::engine::EngineStateSnapshot;
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,10 @@ pub struct CurrentStateContext {
     pub intro_length_ms: Option<u64>,
     pub outro_length_ms: Option<u64>,
     pub first_drop_ms: Option<u64>,
+    /// Phase 19: scored transition windows anchored to section boundaries.
+    pub transition_windows: Vec<TransitionWindow>,
+    /// Phase 19: auto-generated cue points for AI mixing.
+    pub auto_cues: Vec<AutoCue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,6 +83,8 @@ pub struct TrackProfileShort {
     pub energy_trajectory: Option<String>,
     pub intro_length_ms: Option<u64>,
     pub outro_length_ms: Option<u64>,
+    /// Phase 19: auto-cues for AI-aware mixing on candidate tracks.
+    pub auto_cues: Vec<AutoCue>,
 }
 
 /// Set-level flow tracking for AI decisions.
@@ -160,6 +166,8 @@ pub fn build_context(input: &ContextInput) -> AiContext {
         intro_length_ms: playing_track_profile.intro_length_ms,
         outro_length_ms: playing_track_profile.outro_length_ms,
         first_drop_ms: playing_track_profile.first_drop_ms,
+        transition_windows: playing_track_profile.transition_windows.clone(),
+        auto_cues: playing_track_profile.auto_cues.clone(),
     };
 
     let preferences = PreferencesContext {
@@ -213,6 +221,7 @@ pub fn build_context(input: &ContextInput) -> AiContext {
                 energy_trajectory: p.energy_trajectory.clone(),
                 intro_length_ms: p.intro_length_ms,
                 outro_length_ms: p.outro_length_ms,
+                auto_cues: p.auto_cues.clone(),
             }
         })
         .collect();

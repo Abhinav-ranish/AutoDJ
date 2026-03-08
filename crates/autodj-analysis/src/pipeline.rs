@@ -8,7 +8,7 @@ use crate::loudness::analyze_loudness;
 use crate::perceived_tempo::analyze_perceived_tempo;
 use crate::profile::{EnergyInfo, RhythmProfile, SpectralProfile, TrackProfile};
 use crate::rhythm::analyze_rhythm;
-use crate::sections::analyze_sections;
+use crate::sections::{analyze_sections, build_phrase_grid, generate_auto_cues, generate_transition_windows};
 use crate::spectral::analyze_spectral;
 use crate::vocal_detection::detect_vocal_presence;
 use crate::waveform::analyze_waveform;
@@ -139,6 +139,23 @@ pub fn analyze_track(
 
     let perceived_tempo = analyze_perceived_tempo(samples, sample_rate, &tempo, &beat_info);
 
+    // Phase 19: Generate transition windows, phrase grid, and auto-cues
+    let transition_windows = generate_transition_windows(
+        &sections,
+        duration_ms,
+        intro_length,
+        outro_length,
+        first_drop,
+        tempo.bpm,
+    );
+    let phrases = Some(build_phrase_grid(
+        tempo.bpm,
+        duration_ms,
+        &beat_info.times_ms,
+        8, // default 8-bar phrases
+    ));
+    let auto_cues = generate_auto_cues(&sections, first_drop, &beat_info.times_ms);
+
     Ok(TrackProfile {
         version: 1,
         track_id,
@@ -160,6 +177,9 @@ pub fn analyze_track(
         intro_length_ms: intro_length,
         outro_length_ms: outro_length,
         first_drop_ms: first_drop,
+        transition_windows,
+        phrases,
+        auto_cues,
         duration_ms,
         sample_rate,
         channels,

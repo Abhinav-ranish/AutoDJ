@@ -55,6 +55,16 @@ pub enum EqBand {
     High,
 }
 
+/// EQ processing mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EqMode {
+    /// Classic 3-band EQ with smooth crossovers.
+    Classic,
+    /// DJ-style isolator with steep slopes for hard kills.
+    Isolator,
+}
+
 /// The DJ operating mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DjMode {
@@ -80,6 +90,8 @@ pub enum Command {
     SetCrossfader { position: f32 },
     SetDeckGain { deck: DeckId, gain_db: f32 },
     SetEq { deck: DeckId, band: EqBand, gain_db: f32 },
+    SetEqKill { deck: DeckId, band: EqBand, enabled: bool },
+    SetEqMode { deck: DeckId, mode: EqMode },
     SetFilter { deck: DeckId, cutoff_hz: f32, resonance: f32 },
     SetMasterGain { gain_db: f32 },
 
@@ -94,6 +106,10 @@ pub enum Command {
 
     // -- Transition --
     ExecuteTransition { template: String, params: serde_json::Value },
+
+    // -- Phase 19: DJ-style live mixing --
+    /// Seek to a position in milliseconds (for section-aware transitions).
+    SeekMs { deck: DeckId, position_ms: u64 },
 }
 
 /// A command wrapped with scheduling and source metadata.
@@ -160,6 +176,9 @@ impl CommandValidator {
                     start_beat,
                     length_bars: length_bars.clamp(1, 64),
                 })
+            }
+            other @ (Command::SetEqKill { .. } | Command::SetEqMode { .. } | Command::SeekMs { .. }) => {
+                Some(other)
             }
             other => Some(other),
         }

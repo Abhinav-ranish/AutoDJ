@@ -55,6 +55,10 @@ pub struct DeckSnapshot {
     pub eq_low: f32,
     pub eq_mid: f32,
     pub eq_high: f32,
+    pub eq_kill_low: bool,
+    pub eq_kill_mid: bool,
+    pub eq_kill_high: bool,
+    pub eq_isolator: bool,
     pub filter_cutoff: f32,
     pub filter_resonance: f32,
     pub loop_active: bool,
@@ -99,6 +103,10 @@ impl DeckSnapshot {
             eq_low: eq_db[0],
             eq_mid: eq_db[1],
             eq_high: eq_db[2],
+            eq_kill_low: deck.eq.kill_low,
+            eq_kill_mid: deck.eq.kill_mid,
+            eq_kill_high: deck.eq.kill_high,
+            eq_isolator: deck.eq.isolator_mode,
             filter_cutoff: deck.filter.cutoff_hz,
             filter_resonance: deck.filter.resonance,
             loop_active: deck.loop_active(),
@@ -405,6 +413,12 @@ impl AudioEngine {
             Command::SetEq { deck, band, gain_db } => {
                 Self::get_deck_mut(*deck, deck_a, deck_b).set_eq(*band, *gain_db);
             }
+            Command::SetEqKill { deck, band, enabled } => {
+                Self::get_deck_mut(*deck, deck_a, deck_b).set_eq_kill(*band, *enabled);
+            }
+            Command::SetEqMode { deck, mode } => {
+                Self::get_deck_mut(*deck, deck_a, deck_b).set_eq_mode(*mode);
+            }
             Command::SetFilter { deck, cutoff_hz, resonance } => {
                 Self::get_deck_mut(*deck, deck_a, deck_b).set_filter(*cutoff_hz, *resonance);
             }
@@ -422,6 +436,10 @@ impl AudioEngine {
             }
             Command::ClearLoop { deck } => {
                 Self::get_deck_mut(*deck, deck_a, deck_b).clear_loop();
+            }
+            Command::SeekMs { deck, position_ms } => {
+                let frame = transport.ms_to_frames(*position_ms);
+                Self::get_deck_mut(*deck, deck_a, deck_b).seek(frame);
             }
             _ => {
                 log::debug!("Command not yet implemented: {:?}", command);

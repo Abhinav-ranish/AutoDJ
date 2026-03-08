@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from "react";
-import { useStore, EngineState, DjMode } from "./store";
+import { useStore, EngineState, DjMode, AutodjStatus } from "./store";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import logo from "./assets/logo.png";
@@ -192,13 +192,15 @@ function EqKnob({
     value,
     onChange,
     onKill,
+    isKilled: isKilledProp,
 }: {
     label: string;
     value: number;
     onChange: (db: number) => void;
     onKill: () => void;
+    isKilled?: boolean;
 }) {
-    const isKilled = value <= -90;
+    const isKilled = isKilledProp ?? value <= -90;
     return (
         <div className="eq-knob">
             <label>{label}</label>
@@ -314,7 +316,7 @@ function DeckPanel({
     className: string;
     masterBpm: number;
 }) {
-    const { engineState, play, pause, setDeckGain, setEq, setFilter, setLoop, clearLoop, setDeckSpeed, tracks, mode, getTrackProfile, seek } = useStore();
+    const { engineState, play, pause, setDeckGain, setEq, setFilter, setLoop, clearLoop, setDeckSpeed, setEqKill, tracks, mode, getTrackProfile, seek } = useStore();
 
     const snapshot =
         deckId === "A" ? engineState?.deck_a : engineState?.deck_b;
@@ -564,10 +566,14 @@ function DeckPanel({
                                         setEq(deckId, "high", db);
                                     }}
                                     onKill={() => {
-                                        const next = localHi <= -90 ? 0 : -96;
-                                        setLocalHi(next);
-                                        setEq(deckId, "high", next);
+                                        const isKilled = snapshot?.eq_kill_high ?? (localHi <= -90);
+                                        setEqKill(deckId, "high", !isKilled);
+                                        if (isKilled) {
+                                            setLocalHi(0);
+                                            setEq(deckId, "high", 0);
+                                        }
                                     }}
+                                    isKilled={snapshot?.eq_kill_high ?? false}
                                 />
                                 <EqKnob
                                     label="MID"
@@ -577,10 +583,14 @@ function DeckPanel({
                                         setEq(deckId, "mid", db);
                                     }}
                                     onKill={() => {
-                                        const next = localMid <= -90 ? 0 : -96;
-                                        setLocalMid(next);
-                                        setEq(deckId, "mid", next);
+                                        const isKilled = snapshot?.eq_kill_mid ?? (localMid <= -90);
+                                        setEqKill(deckId, "mid", !isKilled);
+                                        if (isKilled) {
+                                            setLocalMid(0);
+                                            setEq(deckId, "mid", 0);
+                                        }
                                     }}
+                                    isKilled={snapshot?.eq_kill_mid ?? false}
                                 />
                                 <EqKnob
                                     label="LO"
@@ -590,10 +600,14 @@ function DeckPanel({
                                         setEq(deckId, "low", db);
                                     }}
                                     onKill={() => {
-                                        const next = localLo <= -90 ? 0 : -96;
-                                        setLocalLo(next);
-                                        setEq(deckId, "low", next);
+                                        const isKilled = snapshot?.eq_kill_low ?? (localLo <= -90);
+                                        setEqKill(deckId, "low", !isKilled);
+                                        if (isKilled) {
+                                            setLocalLo(0);
+                                            setEq(deckId, "low", 0);
+                                        }
                                     }}
+                                    isKilled={snapshot?.eq_kill_low ?? false}
                                 />
                             </div>
 
@@ -896,53 +910,259 @@ function DJView() {
 // ─── AI Conductor Panel ──────────────────────────────────────────
 
 function AiPanel() {
-    const { mode, setMode, requestNextTrack, aiDecision, isThinking, tracks, loadTrack, engineState } = useStore();
+    const { mode, setMode, requestNextTrack, aiDecision, isThinking, tracks, loadTrack, engineState, clearAiDecision, autodjStatus, autodjMessage, setAutodjStatus } = useStore();
 
     const suggestedTrack = aiDecision?.track_selection
         ? tracks.find(t => t.id === aiDecision.track_selection)
         : null;
 
-    // ─── AutoDJ Polling Loop ─────────────────────────────────────
-    // When mode = "autodj", poll for AI decisions every 10 seconds.
-    // Auto-load suggested track onto the idle deck when AI says "transition_now".
+    // ─── Autonomous AutoDJ Controller ────────────────────────────
+    // Phase 19/20: Section-aware state machine with phrase-aligned triggers.
+    // States: idle → monitoring → planning → loading → aligning → transitioning → monitoring
+    const autodjPhaseRef = useRef<"idle" | "monitoring" | "planning" | "loading" | "aligning" | "transitioning">("idle");
+    const pendingTrackRef = useRef<string | null>(null);
+    const transitionLockRef = useRef(false);
+    const cachedProfileRef = useRef<any>(null);
+    const cachedProfileTrackIdRef = useRef<string | null>(null);
+
+    // Reset state when leaving autodj mode
+    useEffect(() => {
+        if (mode !== "autodj") {
+            autodjPhaseRef.current = "idle";
+            pendingTrackRef.current = null;
+            transitionLockRef.current = false;
+            cachedProfileRef.current = null;
+            cachedProfileTrackIdRef.current = null;
+            setAutodjStatus("idle");
+            return;
+        }
+
+        setAutodjStatus("starting", "Initializing AutoDJ...");
+        autodjPhaseRef.current = "idle";
+    }, [mode]);
+
+    // Main AutoDJ tick — runs at ~2Hz (every 500ms) for responsive position tracking
     useEffect(() => {
         if (mode !== "autodj") return;
 
-        // Immediately request first decision
-        requestNextTrack();
-
-        const interval = setInterval(() => {
+        const tick = async () => {
             const state = useStore.getState();
-            // Don't spam if already thinking
-            if (state.isThinking) return;
-            // Don't re-request if we already have a pending transition_now
-            if (state.aiDecision?.decision === "transition_now") return;
-            state.requestNextTrack();
-        }, 10_000); // 10s polling interval
+            const es = state.engineState;
+            if (!es) return;
+
+            const deckA = es.deck_a;
+            const deckB = es.deck_b;
+            const aPlaying = deckA.state === "playing";
+            const bPlaying = deckB.state === "playing";
+            const analyzedTracks = state.tracks.filter(t => t.import_status === "analyzed");
+
+            // ── Phase: No track playing — pick and load a first track ──
+            if (!aPlaying && !bPlaying) {
+                if (autodjPhaseRef.current === "transitioning") return;
+
+                if (analyzedTracks.length === 0) {
+                    setAutodjStatus("error", "No analyzed tracks in library");
+                    return;
+                }
+
+                if (autodjPhaseRef.current === "idle" || autodjPhaseRef.current === "monitoring") {
+                    autodjPhaseRef.current = "planning";
+                    setAutodjStatus("picking_first_track", "Selecting first track...");
+
+                    const pick = analyzedTracks[Math.floor(Math.random() * analyzedTracks.length)];
+                    await state.loadTrack("a", pick.id);
+                    autodjPhaseRef.current = "monitoring";
+                    setAutodjStatus("monitoring", `Playing: ${pick.title || "Unknown"}`);
+                    return;
+                }
+                return;
+            }
+
+            // ── Phase: A track is playing — monitor position ──
+            const playingDeck: "a" | "b" = aPlaying ? "a" : "b";
+            const idleDeck: "a" | "b" = playingDeck === "a" ? "b" : "a";
+            const playingSnap = playingDeck === "a" ? deckA : deckB;
+            const idleSnap = playingDeck === "a" ? deckB : deckA;
+            const positionFrac = playingSnap.position_fraction;
+            const durationMs = playingSnap.duration_ms;
+            const positionMs = playingSnap.position_ms;
+
+            // ── Load track profile for section-aware triggers ──
+            const playingTrackId = playingSnap.track_id;
+            if (playingTrackId && playingTrackId !== cachedProfileTrackIdRef.current) {
+                try {
+                    const profile = await state.getTrackProfile(playingTrackId);
+                    cachedProfileRef.current = profile;
+                    cachedProfileTrackIdRef.current = playingTrackId;
+                } catch {
+                    cachedProfileRef.current = null;
+                }
+            }
+
+            const profile = cachedProfileRef.current;
+            const emergencyFraction = 0.92;
+
+            if (autodjPhaseRef.current !== "monitoring") {
+                // Emergency safety: track almost done and no transition started
+                if (positionFrac > emergencyFraction && !transitionLockRef.current) {
+                    if (idleSnap.state !== "empty" && idleSnap.state !== "playing") {
+                        transitionLockRef.current = true;
+                        autodjPhaseRef.current = "transitioning";
+                        setAutodjStatus("transitioning", "Emergency transition!");
+                        try {
+                            await state.executeTransition(idleDeck.toUpperCase(), "filter_sweep", 8);
+                        } catch (e) {
+                            console.error("Emergency transition failed:", e);
+                        }
+                        setTimeout(() => {
+                            transitionLockRef.current = false;
+                            autodjPhaseRef.current = "monitoring";
+                            pendingTrackRef.current = null;
+                            cachedProfileRef.current = null;
+                            cachedProfileTrackIdRef.current = null;
+                            state.clearAiDecision();
+                            setAutodjStatus("monitoring", "Monitoring playback...");
+                        }, 5000);
+                    }
+                }
+                return;
+            }
+
+            // ── Section-aware transition trigger ──
+            // Use transition windows from track profile if available, else fallback to 75%
+            let shouldTrigger = false;
+            let triggerReason = "";
+
+            if (profile?.transition_windows?.length > 0) {
+                // Find the best upcoming window whose start is within 30 seconds
+                const futureWindows = (profile.transition_windows as Array<{anchor: string, start_ms: number, end_ms: number, score: number}>)
+                    .filter((w) => w.start_ms > positionMs && w.start_ms - positionMs < 30_000)
+                    .sort((a, b) => b.score - a.score);
+
+                if (futureWindows.length > 0) {
+                    const best = futureWindows[0];
+                    // Trigger if we're within 2 seconds of window start
+                    if (best.start_ms - positionMs < 2000) {
+                        shouldTrigger = true;
+                        triggerReason = `window:${best.anchor}@${best.start_ms}ms(score=${best.score.toFixed(2)})`;
+                    }
+                } else if (positionFrac >= 0.75) {
+                    // No upcoming windows within 30s but past 75% — fallback
+                    shouldTrigger = true;
+                    triggerReason = "fallback:75%";
+                }
+            } else {
+                // No profile data — use simple fraction trigger
+                if (positionFrac >= 0.75) {
+                    shouldTrigger = true;
+                    triggerReason = "classic:75%";
+                }
+            }
+
+            if (shouldTrigger && !state.isThinking && !transitionLockRef.current) {
+                autodjPhaseRef.current = "planning";
+                setAutodjStatus("selecting_next", `AI selecting... (${triggerReason})`);
+
+                const decision = await state.requestNextTrack();
+
+                if (!decision || !decision.track_selection) {
+                    if (analyzedTracks.length > 1) {
+                        const currentTrackId = playingSnap.track_id;
+                        const others = analyzedTracks.filter(t => t.id !== currentTrackId);
+                        const pick = others[Math.floor(Math.random() * others.length)];
+                        pendingTrackRef.current = pick.id;
+                    } else if (analyzedTracks.length === 1) {
+                        pendingTrackRef.current = analyzedTracks[0].id;
+                    } else {
+                        autodjPhaseRef.current = "monitoring";
+                        setAutodjStatus("error", "No tracks to transition to");
+                        return;
+                    }
+                } else {
+                    pendingTrackRef.current = decision.track_selection;
+                }
+
+                // Load the next track onto the idle deck
+                const nextTrackId = pendingTrackRef.current!;
+                const nextTrack = state.tracks.find(t => t.id === nextTrackId);
+                setAutodjStatus("loading_next", `Loading: ${nextTrack?.title || "next track"}...`);
+                autodjPhaseRef.current = "loading";
+
+                await state.loadTrack(idleDeck, nextTrackId);
+                await new Promise(r => setTimeout(r, 300));
+
+                // ── Phrase alignment: if we have phrase data, wait for next phrase boundary ──
+                if (profile?.phrases?.boundaries_ms?.length > 0) {
+                    autodjPhaseRef.current = "aligning";
+                    setAutodjStatus("transitioning", "Aligning to phrase boundary...");
+
+                    const boundaries = profile.phrases.boundaries_ms as number[];
+                    const curPos = useStore.getState().engineState
+                        ? (playingDeck === "a"
+                            ? useStore.getState().engineState!.deck_a.position_ms
+                            : useStore.getState().engineState!.deck_b.position_ms)
+                        : positionMs;
+
+                    const nextBoundary = boundaries.find((b: number) => b > curPos);
+                    if (nextBoundary && nextBoundary - curPos < 15_000) {
+                        // Wait until we reach the phrase boundary (check every 100ms)
+                        const waitForBoundary = () => new Promise<void>(resolve => {
+                            const check = setInterval(() => {
+                                const snap = useStore.getState().engineState;
+                                if (!snap) { clearInterval(check); resolve(); return; }
+                                const nowPos = playingDeck === "a" ? snap.deck_a.position_ms : snap.deck_b.position_ms;
+                                if (nowPos >= nextBoundary - 100) {
+                                    clearInterval(check);
+                                    resolve();
+                                }
+                            }, 100);
+                            // Safety timeout: don't wait more than 15 seconds
+                            setTimeout(() => { resolve(); }, 15_000);
+                        });
+                        await waitForBoundary();
+                    }
+                }
+
+                // Execute the transition
+                transitionLockRef.current = true;
+                autodjPhaseRef.current = "transitioning";
+
+                const plan = state.aiDecision?.transition_plan;
+                const templateName = plan?.template_name || "smooth_beatmix";
+                const overrides = plan?.parameter_overrides || {};
+                const durationBars = overrides.duration_bars || 16;
+
+                setAutodjStatus("transitioning", `${templateName} → ${nextTrack?.title || "Unknown"}`);
+
+                try {
+                    await state.executeTransition(idleDeck.toUpperCase(), templateName, durationBars);
+                } catch (e) {
+                    console.error("Transition failed:", e);
+                }
+
+                // Wait for the transition to play out, then reset for next cycle
+                const bpm = es.master_bpm || 128;
+                const transitionMs = (durationBars / bpm) * 60 * 4 * 1000;
+                setTimeout(() => {
+                    transitionLockRef.current = false;
+                    autodjPhaseRef.current = "monitoring";
+                    pendingTrackRef.current = null;
+                    cachedProfileRef.current = null;
+                    cachedProfileTrackIdRef.current = null;
+                    useStore.getState().clearAiDecision();
+                    const curEs = useStore.getState().engineState;
+                    const nowPlayingId = idleDeck === "a" ? curEs?.deck_a?.track_id : curEs?.deck_b?.track_id;
+                    const nowTrack = useStore.getState().tracks.find(t => t.id === nowPlayingId);
+                    setAutodjStatus("monitoring", `Playing: ${nowTrack?.title || "Unknown"}`);
+                }, Math.min(transitionMs + 1000, 60000));
+            }
+        };
+
+        const interval = setInterval(tick, 500);
+        tick();
 
         return () => clearInterval(interval);
     }, [mode]);
-
-    // Auto-load the suggested track onto the idle deck
-    useEffect(() => {
-        if (mode !== "autodj") return;
-        if (!aiDecision || aiDecision.decision !== "transition_now") return;
-        if (!aiDecision.track_selection) return;
-
-        const deckA = engineState?.deck_a;
-        const deckB = engineState?.deck_b;
-
-        // Find the idle deck (not playing, or empty)
-        let targetDeck: "a" | "b" = "b"; // default to B
-        if (deckA?.state === "playing" && deckB?.state !== "playing") {
-            targetDeck = "b";
-        } else if (deckB?.state === "playing" && deckA?.state !== "playing") {
-            targetDeck = "a";
-        }
-
-        // Load the suggested track onto the idle deck
-        loadTrack(targetDeck, aiDecision.track_selection);
-    }, [mode, aiDecision?.decision, aiDecision?.track_selection]);
 
     // Map raw AI action to human-readable status
     const getStatusText = () => {
@@ -1023,6 +1243,55 @@ function AiPanel() {
                         <div className="ai-insight">
                             💡 "{aiDecision?.reason}"
                         </div>
+                        {/* Phase 20: Reasoning tags + confidence */}
+                        {aiDecision?.reasoning_tags && aiDecision.reasoning_tags.length > 0 && (
+                            <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", marginTop: "4px" }}>
+                                {aiDecision.reasoning_tags.map((tag, i) => (
+                                    <span key={i} style={{
+                                        fontSize: "9px",
+                                        padding: "1px 6px",
+                                        borderRadius: "8px",
+                                        background: "rgba(var(--accent-rgb, 100, 100, 255), 0.2)",
+                                        color: "var(--text-muted)",
+                                        border: "1px solid rgba(255,255,255,0.1)",
+                                    }}>{tag}</span>
+                                ))}
+                                {aiDecision.confidence != null && (
+                                    <span style={{
+                                        fontSize: "9px",
+                                        padding: "1px 6px",
+                                        borderRadius: "8px",
+                                        background: aiDecision.confidence > 0.7 ? "rgba(76,175,80,0.2)" : "rgba(255,152,0,0.2)",
+                                        color: "var(--text-muted)",
+                                    }}>conf: {(aiDecision.confidence * 100).toFixed(0)}%</span>
+                                )}
+                            </div>
+                        )}
+                        {/* Phase 20: Action timeline preview */}
+                        {aiDecision?.actions && aiDecision.actions.length > 0 && (
+                            <div style={{
+                                marginTop: "6px",
+                                padding: "6px 8px",
+                                background: "rgba(0,0,0,0.2)",
+                                borderRadius: "6px",
+                                fontSize: "10px",
+                                maxHeight: "80px",
+                                overflowY: "auto",
+                            }}>
+                                <div style={{ color: "var(--text-muted)", marginBottom: "3px", textTransform: "uppercase", letterSpacing: "0.5px", fontSize: "9px" }}>
+                                    Action Timeline ({aiDecision.actions.length} steps)
+                                </div>
+                                {aiDecision.actions.slice(0, 6).map((action, i) => (
+                                    <div key={i} style={{ color: "var(--text-secondary)", display: "flex", gap: "6px" }}>
+                                        <span style={{ color: "var(--text-muted)", minWidth: "40px" }}>{(action.at_ms / 1000).toFixed(1)}s</span>
+                                        <span>{action.kind?.type ?? "?"}</span>
+                                    </div>
+                                ))}
+                                {aiDecision.actions.length > 6 && (
+                                    <div style={{ color: "var(--text-muted)" }}>+{aiDecision.actions.length - 6} more…</div>
+                                )}
+                            </div>
+                        )}
                         <button
                             className="queue-btn"
                             onClick={() => loadTrack("b", suggestedTrack.id)}
@@ -1040,9 +1309,11 @@ function AiPanel() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "auto" }}>
                 <span className="ai-status-text">{getStatusText()}</span>
                 {mode === "autodj" ? (
-                    <div className="ai-listening-indicator">
-                        <div className="listening-dot"></div>
-                        <span>AI is listening</span>
+                    <div className="autodj-status-area">
+                        <div className="ai-listening-indicator">
+                            <div className={`listening-dot ${autodjStatus === "transitioning" ? "transitioning-dot" : autodjStatus === "error" ? "error-dot" : ""}`}></div>
+                            <span>{autodjMessage || "AI is DJing"}</span>
+                        </div>
                     </div>
                 ) : (
                     <button
@@ -1132,6 +1403,10 @@ function TransitionsPanel() {
                         <option value="smooth_beatmix">Smooth Beatmix</option>
                         <option value="filter_sweep">Filter Sweep</option>
                         <option value="echo_drop">Echo Drop</option>
+                        <option value="drop_swap">Drop Swap</option>
+                        <option value="loop_roll">Loop Roll</option>
+                        <option value="bass_kill_swap">Bass Kill Swap</option>
+                        <option value="break_blend">Break Blend</option>
                     </select>
                 </div>
 

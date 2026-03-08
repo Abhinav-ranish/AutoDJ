@@ -89,7 +89,7 @@ impl Biquad {
     }
 }
 
-/// 3-band EQ with adjustable per-band gain.
+/// 3-band EQ with adjustable per-band gain and optional isolator/kill mode.
 pub struct ThreeBandEq {
     /// LP filter for extracting the low band (< 250 Hz).
     lp_low: Biquad,
@@ -100,10 +100,24 @@ pub struct ThreeBandEq {
     /// HP filter for extracting the high band (> 2500 Hz).
     hp_high: Biquad,
 
+    // Steeper isolator filters (second cascade stage for LR4 in isolator mode)
+    lp_low_2: Biquad,
+    hp_low_2: Biquad,
+    lp_high_2: Biquad,
+    hp_high_2: Biquad,
+
     /// Per-band gain in linear amplitude.
     pub gain_low: f32,
     pub gain_mid: f32,
     pub gain_high: f32,
+
+    /// Per-band kill switches.
+    pub kill_low: bool,
+    pub kill_mid: bool,
+    pub kill_high: bool,
+
+    /// Whether to use isolator (steep LR4) or classic (LR2) mode.
+    pub isolator_mode: bool,
 }
 
 impl ThreeBandEq {
@@ -114,14 +128,27 @@ impl ThreeBandEq {
             hp_low: Biquad::new(),
             lp_high: Biquad::new(),
             hp_high: Biquad::new(),
+            lp_low_2: Biquad::new(),
+            hp_low_2: Biquad::new(),
+            lp_high_2: Biquad::new(),
+            hp_high_2: Biquad::new(),
             gain_low: 1.0,
             gain_mid: 1.0,
             gain_high: 1.0,
+            kill_low: false,
+            kill_mid: false,
+            kill_high: false,
+            isolator_mode: false,
         };
         eq.lp_low.set_lowpass(250.0, sample_rate);
         eq.hp_low.set_highpass(250.0, sample_rate);
         eq.lp_high.set_lowpass(2500.0, sample_rate);
         eq.hp_high.set_highpass(2500.0, sample_rate);
+        // Cascade stage for isolator (LR4)
+        eq.lp_low_2.set_lowpass(250.0, sample_rate);
+        eq.hp_low_2.set_highpass(250.0, sample_rate);
+        eq.lp_high_2.set_lowpass(2500.0, sample_rate);
+        eq.hp_high_2.set_highpass(2500.0, sample_rate);
         eq
     }
 
@@ -140,33 +167,68 @@ impl ThreeBandEq {
         }
     }
 
+    /// Set a kill switch for a band.
+    pub fn set_kill(&mut self, band: usize, enabled: bool) {
+        match band {
+            0 => self.kill_low = enabled,
+            1 => self.kill_mid = enabled,
+            2 => self.kill_high = enabled,
+            _ => {}
+        }
+    }
+
+    /// Switch between classic (LR2) and isolator (LR4) mode.
+    pub fn set_isolator_mode(&mut self, enabled: bool) {
+        self.isolator_mode = enabled;
+    }
+
     /// Process one stereo frame through the 3-band EQ.
     ///
     /// Signal flow:
     ///   input → LP(250) → low band
     ///   input → HP(250) → LP(2500) → mid band
     ///   input → HP(250) → HP(2500) → high band
+    ///
+    /// In isolator mode, each filter is cascaded (LR4) for steeper slopes.
     #[inline(always)]
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
         // Low band
-        let low_l = self.lp_low.process_l(l);
-        let low_r = self.lp_low.process_r(r);
+        let mut low_l = self.lp_low.process_l(l);
+        let mut low_r = self.lp_low.process_r(r);
 
         // Remove low frequencies
-        let no_low_l = self.hp_low.process_l(l);
-        let no_low_r = self.hp_low.process_r(r);
+        let mut no_low_l = self.hp_low.process_l(l);
+        let mut no_low_r = self.hp_low.process_r(r);
+
+        if self.isolator_mode {
+            low_l = self.lp_low_2.process_l(low_l);
+            low_r = self.lp_low_2.process_r(low_r);
+            no_low_l = self.hp_low_2.process_l(no_low_l);
+            no_low_r = self.hp_low_2.process_r(no_low_r);
+        }
 
         // Mid band (from no-low signal, take below 2500 Hz)
-        let mid_l = self.lp_high.process_l(no_low_l);
-        let mid_r = self.lp_high.process_r(no_low_r);
+        let mut mid_l = self.lp_high.process_l(no_low_l);
+        let mut mid_r = self.lp_high.process_r(no_low_r);
 
         // High band (from no-low signal, take above 2500 Hz)
-        let high_l = self.hp_high.process_l(no_low_l);
-        let high_r = self.hp_high.process_r(no_low_r);
+        let mut high_l = self.hp_high.process_l(no_low_l);
+        let mut high_r = self.hp_high.process_r(no_low_r);
 
-        // Sum with gains
-        let out_l = low_l * self.gain_low + mid_l * self.gain_mid + high_l * self.gain_high;
-        let out_r = low_r * self.gain_low + mid_r * self.gain_mid + high_r * self.gain_high;
+        if self.isolator_mode {
+            mid_l = self.lp_high_2.process_l(mid_l);
+            mid_r = self.lp_high_2.process_r(mid_r);
+            high_l = self.hp_high_2.process_l(high_l);
+            high_r = self.hp_high_2.process_r(high_r);
+        }
+
+        // Apply gains (kill = gain 0.0)
+        let g_low = if self.kill_low { 0.0 } else { self.gain_low };
+        let g_mid = if self.kill_mid { 0.0 } else { self.gain_mid };
+        let g_high = if self.kill_high { 0.0 } else { self.gain_high };
+
+        let out_l = low_l * g_low + mid_l * g_mid + high_l * g_high;
+        let out_r = low_r * g_low + mid_r * g_mid + high_r * g_high;
 
         (out_l, out_r)
     }

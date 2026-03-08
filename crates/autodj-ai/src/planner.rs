@@ -24,15 +24,45 @@ Analyze the current state, available tracks, and set flow to make the best mixin
 - smooth_beatmix: 16-32 bars, bass swap, best for same-genre/tempo tracks
 - filter_sweep: 8-16 bars, high-pass sweep + incoming fade, good for energy builds or genre changes
 - echo_drop: 4-8 bars, echo feedback → silence → drop, best for big energy moments or large tempo/genre jumps
+- drop_swap: HP sweep out → hard cut to incoming on drop. Great for buildup-to-drop moments.
+- loop_roll: 4→2→1 bar loop stutter on outgoing → cut to incoming. High impact, good for energy peaks.
+- bass_kill_swap: Blend mids/highs first, then swap bass at a beat boundary. Clean power swap, great for same-genre tracks.
+- break_blend: Gentle HP opening on incoming during outgoing's break/outro. Best for melodic or vocal-heavy transitions.
 
-## Timing Rules
-- Use section boundaries (intro/outro) for transitions, not arbitrary positions
-- Match outgoing outro length with incoming intro length when possible
-- execute_at_ms should target the start of the outgoing track's outro section
-- Never trigger during a vocal hook or drop buildup
+## Section-Aware Timing
+- The current track has transition_windows: scored windows anchored to section boundaries.
+  Use the highest-scored window whose start_ms is still in the future.
+- Use phrase boundaries to quantize transition starts to the nearest 8-bar grid point.
+- execute_at_ms should target a transition window start, not an arbitrary time.
+- Never trigger during a vocal hook or drop buildup.
+- Use auto_cues (first_beat, intro, drop, brk, outro) for precise section references.
+
+## Action Timeline (v2)
+Instead of (or in addition to) a transition_plan, you may provide an "actions" array.
+Each action is: { "at_ms": <ms from transition start>, "kind": { "type": "...", ...fields } }.
+Action types:
+  - load_track: { deck, track_id }
+  - set_tempo: { deck, bpm }
+  - set_gain: { deck, gain_db } — clamped to [-60, 12] dB
+  - set_filter: { deck, cutoff_hz, resonance } — cutoff clamped to [20, 20000]
+  - set_eq_band: { deck, band ("low"|"mid"|"high"), gain_db } — clamped to [-24, 6] dB
+  - set_eq_kill: { deck, band, enabled }
+  - set_loop: { deck, length_bars }
+  - clear_loop: { deck }
+  - set_crossfader: { position } — 0.0=A, 0.5=center, 1.0=B
+  - play/pause: { deck }
+  - execute_template: { template_name, params }
+If actions are present they override transition_plan.
+
+## Safety Constraints
+- EQ gain: [-24, 6] dB
+- Filter cutoff: [20, 20000] Hz
+- Gain: [-60, 12] dB
+- Crossfader: [0.0, 1.0]
+- Never issue two conflicting actions for the same deck at the same at_ms.
 
 ## Output
-Return valid JSON with fields: decision ("wait"|"transition_now"|"prepare_next"), reason, track_selection (track id), execute_at_ms, transition_plan ({template_name, parameter_overrides}).
+Return valid JSON with fields: decision ("wait"|"transition_now"|"prepare_next"), reason, track_selection (track id), execute_at_ms, transition_plan ({template_name, parameter_overrides}), actions (optional action timeline array), reasoning_tags (optional string array), confidence (0.0-1.0).
 Include detailed reasoning in the reason field."#;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,12 +72,45 @@ pub struct AiDecision {
     pub track_selection: Option<String>,
     pub execute_at_ms: Option<u64>,
     pub transition_plan: Option<TransitionPlan>,
+    /// Phase 20: structured action timeline (optional, overrides template if present)
+    pub actions: Option<Vec<MixAction>>,
+    /// Phase 20: reasoning tags for debugging
+    pub reasoning_tags: Option<Vec<String>>,
+    /// Phase 20: overall confidence (0.0–1.0)
+    pub confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransitionPlan {
     pub template_name: String,
     pub parameter_overrides: Option<serde_json::Value>,
+}
+
+/// Phase 20: A single timestamped mixing action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MixAction {
+    /// When to execute, in ms relative to the transition start.
+    pub at_ms: u64,
+    /// What to do.
+    pub kind: MixActionKind,
+}
+
+/// Phase 20: Types of mixing actions the AI can issue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MixActionKind {
+    LoadTrack { deck: String, track_id: String },
+    SetTempo { deck: String, bpm: f64 },
+    SetGain { deck: String, gain_db: f32 },
+    SetFilter { deck: String, cutoff_hz: f32, resonance: f32 },
+    SetEqBand { deck: String, band: String, gain_db: f32 },
+    SetEqKill { deck: String, band: String, enabled: bool },
+    SetLoop { deck: String, length_bars: u32 },
+    ClearLoop { deck: String },
+    SetCrossfader { position: f32 },
+    Play { deck: String },
+    Pause { deck: String },
+    ExecuteTemplate { template_name: String, params: serde_json::Value },
 }
 
 pub struct AiPlanner {
@@ -156,12 +219,29 @@ impl AiPlanner {
         let is_ending = context.current_state.time_remaining_ms < 60_000;
         let decision = if is_ending { "transition_now" } else { "prepare_next" };
 
-        // Section-aware transition timing: use outro start if available
-        let execute_at = context.current_state.duration_ms.saturating_sub(
-            context.current_state.outro_length_ms.unwrap_or(10_000)
-        );
+        // ── Section-aware transition timing ──────────────────────────────────
+        // Pick the best transition window whose start is still in the future.
+        let now_ms = context.current_state.elapsed_ms;
+        let best_window = current_profile.transition_windows.iter()
+            .filter(|w| w.start_ms > now_ms)
+            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Vocal-aware + genre-aware template selection
+        let execute_at = if let Some(w) = best_window {
+            // Snap to nearest phrase boundary if we have phrase data
+            if let Some(ref phrases) = current_profile.phrases {
+                autodj_analysis::sections::next_phrase_boundary(phrases, w.start_ms)
+                    .unwrap_or(w.start_ms)
+            } else {
+                w.start_ms
+            }
+        } else {
+            // Fallback: use outro start
+            context.current_state.duration_ms.saturating_sub(
+                context.current_state.outro_length_ms.unwrap_or(10_000)
+            )
+        };
+
+        // ── Template selection rules ─────────────────────────────────────────
         let energy_jump = next_track.energy.average - current_profile.energy.average;
         let next_class = classifications.get(&next_track.track_id);
         let genre_change = match (
@@ -178,23 +258,55 @@ impl AiPlanner {
             (Some(a), Some(b)) => a > 0.5 && b > 0.5,
             _ => false,
         };
+        let bpm_diff = (current_profile.tempo.bpm - next_track.tempo.bpm).abs();
 
-        let template_name = if energy_jump > 0.3 {
-            "echo_drop"
-        } else if genre_change || vocal_overlap {
-            "filter_sweep"
+        let (template_name, reasoning_tags) = if energy_jump > 0.3 {
+            // Big energy jump → dramatic transition
+            if bpm_diff > 10.0 {
+                ("loop_roll", vec!["high_energy_jump", "tempo_mismatch", "loop_roll"])
+            } else {
+                ("drop_swap", vec!["high_energy_jump", "drop_swap"])
+            }
+        } else if vocal_overlap {
+            // Vocal overlap → gentle filtered blend
+            ("break_blend", vec!["vocal_overlap", "break_blend"])
+        } else if genre_change {
+            if energy_jump.abs() < 0.15 {
+                ("bass_kill_swap", vec!["genre_change", "similar_energy", "bass_kill_swap"])
+            } else {
+                ("filter_sweep", vec!["genre_change", "filter_sweep"])
+            }
+        } else if energy_jump < -0.2 {
+            ("break_blend", vec!["energy_drop", "break_blend"])
         } else {
-            "smooth_beatmix"
+            // Default: same genre, similar energy → clean beat-matched blend
+            ("smooth_beatmix", vec!["compatible", "smooth_beatmix"])
         };
+
+        // ── Build action timeline ────────────────────────────────────────────
+        let beat_ms = (60_000.0 / current_profile.tempo.bpm) as u64;
+        let bar_ms = beat_ms * 4;
+        let incoming_deck = if context.current_state.playing_deck == "A" { "B" } else { "A" };
+        let outgoing_deck = context.current_state.playing_deck.clone();
+        let actions = build_heuristic_timeline(
+            template_name,
+            &outgoing_deck,
+            incoming_deck,
+            &next_track.track_id,
+            bar_ms,
+            next_track.tempo.bpm,
+        );
 
         Ok(AiDecision {
             decision: decision.to_string(),
             reason: format!(
-                "Heuristic: selected {} (genre: {}, mood: {}, template: {}).",
+                "Heuristic: selected {} (genre: {}, mood: {}, template: {}, window: {}).",
                 next_track.track_id,
                 next_class.and_then(|c| c.genre.as_deref()).unwrap_or("unknown"),
                 next_class.and_then(|c| c.mood.as_deref()).unwrap_or("unknown"),
                 template_name,
+                best_window.map(|w| format!("{}ms score={:.2}", w.start_ms, w.score))
+                    .unwrap_or_else(|| "fallback".to_string()),
             ),
             track_selection: Some(next_track.track_id.clone()),
             execute_at_ms: Some(execute_at),
@@ -202,6 +314,146 @@ impl AiPlanner {
                 template_name: template_name.to_string(),
                 parameter_overrides: None,
             }),
+            actions: Some(actions),
+            reasoning_tags: Some(reasoning_tags.into_iter().map(String::from).collect()),
+            confidence: Some(0.7),
         })
     }
+}
+
+/// Build a concrete action timeline for a given template.
+fn build_heuristic_timeline(
+    template: &str,
+    outgoing: &str,
+    incoming: &str,
+    incoming_track_id: &str,
+    bar_ms: u64,
+    incoming_bpm: f64,
+) -> Vec<MixAction> {
+    let mut actions = Vec::new();
+    let out = outgoing.to_string();
+    let inc = incoming.to_string();
+
+    // Always: load + cue incoming, sync tempo
+    actions.push(MixAction { at_ms: 0, kind: MixActionKind::LoadTrack { deck: inc.clone(), track_id: incoming_track_id.to_string() } });
+    actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetTempo { deck: inc.clone(), bpm: incoming_bpm } });
+    actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -60.0 } });
+    actions.push(MixAction { at_ms: 0, kind: MixActionKind::Play { deck: inc.clone() } });
+
+    match template {
+        "smooth_beatmix" => {
+            // 16-bar blend with bass swap at bar 8
+            let blend_bars: u64 = 16;
+            let swap_bar: u64 = 8;
+            for i in 0..blend_bars {
+                let t = i * bar_ms;
+                let frac = i as f32 / blend_bars as f32;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -60.0 + 60.0 * frac } });
+            }
+            // Bass swap: kill incoming bass until swap, then kill outgoing bass
+            actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: true } });
+            actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: false } });
+            actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: true } });
+            // Fade out outgoing in second half
+            for i in swap_bar..blend_bars {
+                let t = i * bar_ms;
+                let frac = (i - swap_bar) as f32 / (blend_bars - swap_bar) as f32;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -60.0 * frac } });
+            }
+            // Cleanup
+            let end = blend_bars * bar_ms;
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: false } });
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
+        }
+        "filter_sweep" => {
+            // 8-bar HP sweep on outgoing + incoming fade
+            let bars: u64 = 8;
+            for i in 0..bars {
+                let t = i * bar_ms;
+                let frac = i as f32 / bars as f32;
+                let cutoff = 200.0 + 3800.0 * frac;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetFilter { deck: out.clone(), cutoff_hz: cutoff, resonance: 0.5 } });
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -60.0 + 60.0 * frac } });
+            }
+            let end = bars * bar_ms;
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::SetFilter { deck: out.clone(), cutoff_hz: 20000.0, resonance: 0.0 } });
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
+        }
+        "echo_drop" | "drop_swap" => {
+            // 4-bar buildup, silence gap, hard cut to incoming
+            let buildup_bars: u64 = 4;
+            for i in 0..buildup_bars {
+                let t = i * bar_ms;
+                let frac = i as f32 / buildup_bars as f32;
+                let cutoff = 200.0 + 3800.0 * frac;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetFilter { deck: out.clone(), cutoff_hz: cutoff, resonance: 0.7 } });
+            }
+            let cut_at = buildup_bars * bar_ms;
+            actions.push(MixAction { at_ms: cut_at, kind: MixActionKind::Pause { deck: out.clone() } });
+            actions.push(MixAction { at_ms: cut_at, kind: MixActionKind::SetFilter { deck: out.clone(), cutoff_hz: 20000.0, resonance: 0.0 } });
+            actions.push(MixAction { at_ms: cut_at, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: 0.0 } });
+        }
+        "loop_roll" => {
+            // 4-bar→2-bar→1-bar loop rolls on outgoing, then cut
+            actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetLoop { deck: out.clone(), length_bars: 4 } });
+            actions.push(MixAction { at_ms: 4 * bar_ms, kind: MixActionKind::SetLoop { deck: out.clone(), length_bars: 2 } });
+            actions.push(MixAction { at_ms: 6 * bar_ms, kind: MixActionKind::SetLoop { deck: out.clone(), length_bars: 1 } });
+            let cut_at = 7 * bar_ms;
+            actions.push(MixAction { at_ms: cut_at, kind: MixActionKind::ClearLoop { deck: out.clone() } });
+            actions.push(MixAction { at_ms: cut_at, kind: MixActionKind::Pause { deck: out.clone() } });
+            actions.push(MixAction { at_ms: cut_at, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: 0.0 } });
+        }
+        "bass_kill_swap" => {
+            // 16-bar blend: bring in mids/highs first, swap bass at bar 8
+            let blend_bars: u64 = 16;
+            let swap_bar: u64 = 8;
+            actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: true } });
+            for i in 0..blend_bars {
+                let t = i * bar_ms;
+                let frac = i as f32 / blend_bars as f32;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -40.0 + 40.0 * frac } });
+            }
+            actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: false } });
+            actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: true } });
+            for i in swap_bar..blend_bars {
+                let t = i * bar_ms;
+                let frac = (i - swap_bar) as f32 / (blend_bars - swap_bar) as f32;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -40.0 * frac } });
+            }
+            let end = blend_bars * bar_ms;
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: false } });
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
+        }
+        "break_blend" => {
+            // 12-bar gentle blend: HP opening on incoming, soft fade on outgoing
+            let bars: u64 = 12;
+            for i in 0..bars {
+                let t = i * bar_ms;
+                let frac = i as f32 / bars as f32;
+                let cutoff = 4000.0 - 3800.0 * frac; // HP opening from 4kHz → 200Hz
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetFilter { deck: inc.clone(), cutoff_hz: cutoff, resonance: 0.3 } });
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -40.0 + 40.0 * frac } });
+                // Gentle fade on outgoing in second half
+                if i >= bars / 2 {
+                    let fade_frac = (i - bars / 2) as f32 / (bars / 2) as f32;
+                    actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -30.0 * fade_frac } });
+                }
+            }
+            let end = bars * bar_ms;
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::SetFilter { deck: inc.clone(), cutoff_hz: 20000.0, resonance: 0.0 } });
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
+        }
+        _ => {
+            // Unknown template — just execute it directly
+            actions.push(MixAction {
+                at_ms: 0,
+                kind: MixActionKind::ExecuteTemplate {
+                    template_name: template.to_string(),
+                    params: serde_json::json!({}),
+                },
+            });
+        }
+    }
+
+    actions
 }

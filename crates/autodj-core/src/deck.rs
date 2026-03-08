@@ -1,7 +1,7 @@
 //! Deck: playback unit with transport state, gain, EQ, filter, loop, and track buffer.
 
 use crate::buffer::TrackBuffer;
-use crate::command::EqBand;
+use crate::command::{EqBand, EqMode};
 use crate::eq::ThreeBandEq;
 use crate::filter::SvfFilter;
 use serde::{Deserialize, Serialize};
@@ -201,6 +201,21 @@ impl Deck {
             EqBand::High => 2,
         };
         self.eq.set_gain_db(band_index, gain_db);
+    }
+
+    /// Set EQ kill switch for a band.
+    pub fn set_eq_kill(&mut self, band: EqBand, enabled: bool) {
+        let band_index = match band {
+            EqBand::Low => 0,
+            EqBand::Mid => 1,
+            EqBand::High => 2,
+        };
+        self.eq.set_kill(band_index, enabled);
+    }
+
+    /// Set EQ mode (classic / isolator).
+    pub fn set_eq_mode(&mut self, mode: EqMode) {
+        self.eq.set_isolator_mode(mode == EqMode::Isolator);
     }
 
     /// Set filter parameters.

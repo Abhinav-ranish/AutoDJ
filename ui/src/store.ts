@@ -30,6 +30,10 @@ export interface DeckSnapshot {
     eq_low: number;
     eq_mid: number;
     eq_high: number;
+    eq_kill_low: boolean;
+    eq_kill_mid: boolean;
+    eq_kill_high: boolean;
+    eq_isolator: boolean;
     filter_cutoff: number;
     filter_resonance: number;
     loop_active: boolean;
@@ -48,17 +52,36 @@ export interface EngineState {
     sample_pos: number;
 }
 
+export interface MixAction {
+    at_ms: number;
+    kind: Record<string, any>;
+}
+
 export interface AiDecision {
     decision: string;
     reason: string;
     track_selection?: string;
+    execute_at_ms?: number;
     transition_plan?: {
         template_name: string;
         parameter_overrides?: any;
     };
+    actions?: MixAction[];
+    reasoning_tags?: string[];
+    confidence?: number;
 }
 
 export type DjMode = "manual" | "assisted" | "autodj";
+
+export type AutodjStatus =
+    | "idle"
+    | "starting"
+    | "picking_first_track"
+    | "monitoring"
+    | "selecting_next"
+    | "loading_next"
+    | "transitioning"
+    | "error";
 
 interface DJStore {
     tracks: TrackRecord[];
@@ -70,6 +93,10 @@ interface DJStore {
     isThinking: boolean;
     errorToast: string | null;
     analyzingTracks: Set<string>;
+    classifyingTracks: Set<string>;
+    autodjStatus: AutodjStatus;
+    autodjMessage: string;
+    autodjTransitioning: boolean;
     aiConfig: {
         enabled: boolean;
         api_key: string;
@@ -94,17 +121,25 @@ interface DJStore {
     setLoop: (deck: string, lengthBars: number) => Promise<void>;
     clearLoop: (deck: string) => Promise<void>;
     setDeckSpeed: (deck: string, speedMultiplier: number) => Promise<void>;
+    setEqKill: (deck: string, band: string, enabled: boolean) => Promise<void>;
+    setEqMode: (deck: string, mode: string) => Promise<void>;
+    seekMs: (deck: string, positionMs: number) => Promise<void>;
+    getAutoCues: (trackId: string) => Promise<Array<[string, number, number]>>;
+    submitTransitionFeedback: (fromTrackId: string, toTrackId: string, templateUsed: string, rating: number, notes?: string) => Promise<void>;
     pollEngineState: () => Promise<void>;
     setActiveView: (view: "dj" | "library") => void;
     analyzeTrack: (trackId: string) => Promise<void>;
+    classifyTrack: (trackId: string) => Promise<void>;
     getTrackProfile: (trackId: string) => Promise<any>;
     executeTransition: (deck: string, template: string, durationBars: number) => Promise<void>;
     clearLibrary: () => Promise<void>;
 
     // AI Actions
     setMode: (mode: DjMode) => Promise<void>;
-    requestNextTrack: () => Promise<void>;
+    requestNextTrack: () => Promise<AiDecision | null>;
+    clearAiDecision: () => void;
     setAiConfig: (config: any) => Promise<void>;
+    setAutodjStatus: (status: AutodjStatus, message?: string) => void;
 
     // Recording
     isRecording: boolean;
@@ -126,6 +161,10 @@ export const useStore = create<DJStore>((set, get) => ({
     isThinking: false,
     errorToast: null,
     analyzingTracks: new Set(),
+    classifyingTracks: new Set(),
+    autodjStatus: "idle" as AutodjStatus,
+    autodjMessage: "",
+    autodjTransitioning: false,
     aiConfig: null,
     isRecording: false,
     recordingStartTime: null,
@@ -279,6 +318,57 @@ export const useStore = create<DJStore>((set, get) => ({
         }
     },
 
+    setEqKill: async (deck: string, band: string, enabled: boolean) => {
+        try {
+            await invoke("set_eq_kill", { deck: deck.toLowerCase(), band, enabled });
+        } catch (e: any) {
+            get().setErrorToast(`EQ Kill failed: ${e}`);
+            console.error("EQ Kill failed:", e);
+        }
+    },
+
+    setEqMode: async (deck: string, mode: string) => {
+        try {
+            await invoke("set_eq_mode", { deck: deck.toLowerCase(), mode });
+        } catch (e: any) {
+            get().setErrorToast(`EQ Mode failed: ${e}`);
+            console.error("EQ Mode failed:", e);
+        }
+    },
+
+    seekMs: async (deck: string, positionMs: number) => {
+        try {
+            await invoke("seek_ms", { deck: deck.toLowerCase(), positionMs: Math.round(positionMs) });
+        } catch (e: any) {
+            get().setErrorToast(`Seek failed: ${e}`);
+            console.error("Seek failed:", e);
+        }
+    },
+
+    getAutoCues: async (trackId: string) => {
+        try {
+            return await invoke<Array<[string, number, number]>>("get_auto_cues", { trackId });
+        } catch (e: any) {
+            console.error("Get auto cues failed:", e);
+            return [];
+        }
+    },
+
+    submitTransitionFeedback: async (fromTrackId: string, toTrackId: string, templateUsed: string, rating: number, notes?: string) => {
+        try {
+            await invoke("submit_transition_feedback", {
+                fromTrackId,
+                toTrackId,
+                templateUsed,
+                rating,
+                notes: notes ?? null,
+                decisionJson: null,
+            });
+        } catch (e: any) {
+            console.error("Submit feedback failed:", e);
+        }
+    },
+
     pollEngineState: async () => {
         // Now handled via Tauri events
     },
@@ -291,6 +381,11 @@ export const useStore = create<DJStore>((set, get) => ({
             await invoke("analyze_track", { trackId });
             // Re-fetch tracks to update status immediately
             await get().fetchTracks();
+            // Auto-classify if API key is configured
+            const config = get().aiConfig;
+            if (config?.api_key && !get().classifyingTracks.has(trackId)) {
+                get().classifyTrack(trackId).catch(console.error);
+            }
         } catch (e: any) {
             get().setErrorToast(`Analyze failed: ${e}`);
             console.error("Analyze failed:", e);
@@ -299,6 +394,22 @@ export const useStore = create<DJStore>((set, get) => ({
                 const next = new Set(state.analyzingTracks);
                 next.delete(trackId);
                 return { analyzingTracks: next };
+            });
+        }
+    },
+
+    classifyTrack: async (trackId: string) => {
+        set((state) => ({ classifyingTracks: new Set(state.classifyingTracks).add(trackId) }));
+        try {
+            await invoke("classify_track", { trackId });
+            await get().fetchTracks();
+        } catch (e: any) {
+            console.warn(`Classify failed for ${trackId}:`, e);
+        } finally {
+            set((state) => {
+                const next = new Set(state.classifyingTracks);
+                next.delete(trackId);
+                return { classifyingTracks: next };
             });
         }
     },
@@ -372,26 +483,19 @@ export const useStore = create<DJStore>((set, get) => ({
         try {
             const decision = await invoke<AiDecision>("request_next_track");
             set({ aiDecision: decision });
-
-            // AutoDJ Mode: Auto-execute transition if decision is ready
-            if (get().mode === "autodj" && decision.decision === "transition_now" && decision.transition_plan) {
-                const plan = decision.transition_plan;
-                const overrides = plan.parameter_overrides || {};
-                const durationBars = overrides.duration_bars || 16;
-                const incomingDeck = overrides.incoming_deck ? overrides.incoming_deck.toLowerCase() : "b";
-
-                // For auto-transition, we target the deck that is currently playing to execute the outgoing transition.
-                // Assuming we get the currently active deck (naive approach here, since we don't know for sure).
-                // Usually the transition is executed ON the playing deck TO the incoming deck.
-                // For now use the 'incomingDeck' inverse, or just pass 'a' if incoming is 'b'.
-                const targetDeck = incomingDeck === "a" ? "B" : "A";
-
-                await get().executeTransition(targetDeck, plan.template_name, durationBars);
-            }
+            return decision;
         } catch (e) {
             console.error("AI Planning failed:", e);
+            return null;
+        } finally {
+            set({ isThinking: false });
         }
-        set({ isThinking: false });
+    },
+
+    clearAiDecision: () => set({ aiDecision: null }),
+
+    setAutodjStatus: (status: AutodjStatus, message?: string) => {
+        set({ autodjStatus: status, autodjMessage: message ?? "" });
     },
 
     setAiConfig: async (config: any) => {

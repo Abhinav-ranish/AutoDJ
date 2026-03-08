@@ -98,14 +98,9 @@ ction — `camelot.rs`
 - [x] Update frontend UI state and Types (`TrackRecord`) to show Groove/Perceived Tempo
 - [x] Refactor AI DJ `scorer.rs` and `context.rs` to prioritize perceived tempo over raw BPM
 
----
-
-## AI Enrichment Overhaul (Phases 11–17)
-
+## Phase 11: Code Quality Cleanup ✅
 > Detailed design: `docs/plans/2026-03-07-ai-enrichment-design.md`
 > Detailed implementation: `docs/plans/2026-03-07-ai-enrichment-implementation.md`
-
-## Phase 11: Code Quality Cleanup ✅
 - [x] Use `FRAC_1_SQRT_2` constant in EQ biquad filters
 - [x] Remove unused imports, variables, and constants
 - [x] Resolve all clippy warnings across workspace
@@ -160,3 +155,192 @@ ction — `camelot.rs`
 - [x] Library enhancements: genre badges (purple), mood badges (orange), 9-column grid
 - [ ] Replace synthetic beat grid with DP beat tracker (Ellis 2007) — deferred
 - [ ] Album art display in deck panels — deferred
+
+## Phase 18: Autonomous AutoDJ Loop ✅
+- [x] Auto-classify tracks after analysis (if Gemini API key configured)
+- [x] Position-aware AutoDJ controller (replaces blind 10s polling)
+- [x] Auto-pick and load first track when entering AutoDJ with empty decks
+- [x] Intelligent transition triggering at 75% track position / outro start
+- [x] End-of-track safety fallback (emergency transition at 92%)
+- [x] Fix decision lifecycle: clear AI decisions after transition completes
+- [x] Chain transitions continuously (Deck A → B → A → B...)
+- [x] AutoDJ status feedback UI (monitoring, selecting, loading, transitioning)
+- [x] Return `AiDecision` from `requestNextTrack` for controller consumption
+- [x] All Rust tests pass (61), TypeScript compiles clean, Vite builds
+
+---
+
+## Phase 19: DJ-Style Live Mixing + Phrase/Section-Aware Transitions
+
+Goal: stop “wait until track ends + SmoothBeatmix only”. Make the engine + controller mix *inside* songs using musical landmarks (intro/outro/drop/break) and phrase alignment.
+
+* [ ] **Section-aware transition windows**
+
+  * [ ] Define “safe mix windows” per track from existing markers: `intro`, `buildup`, `drop`, `breakdown`, `outro`, `first_drop_ms`, `intro_length_ms`, `outro_length_ms`
+  * [ ] Generate candidate transition anchors: `start_of_outro`, `pre_drop_8/16`, `post_drop_8/16`, `break_start`, etc.
+  * [ ] Add `TransitionWindow` struct and persist into `TrackProfile` (or compute on-demand in AI context)
+
+* [ ] **Phrase alignment (4/8/16 bar alignment)**
+
+  * [ ] Add phrase grid derived from beat grid (even if synthetic for now)
+  * [ ] Teach controller to schedule transitions at next phrase boundary (not “at end”)
+  * [ ] Add engine helper: `next_phrase_boundary(now, bars=N) -> execute_at_ms`
+
+* [ ] **Loop-driven “DJ mix” behavior**
+
+  * [ ] Allow transition logic to **loop** outgoing track outro or incoming track intro to “hold the groove” until the perfect entry
+  * [ ] Add transition step primitives: `SetLoop(bars)`, `ClearLoop`, `SeekToMarker(marker_id)`
+  * [ ] Add “emergency loop” when mismatch/confidence low (keep playing while AI replans)
+
+* [ ] **Hot-cue / marker system usable by AI**
+
+  * [ ] Define canonical cue markers per track: `CUE_INTRO`, `CUE_DROP`, `CUE_BREAK`, `CUE_OUTRO`, `CUE_FIRST_BEAT`
+  * [ ] Auto-generate these cues during analysis (store in DB)
+  * [ ] Add engine command: `JumpHotCue(deck, cue_id)` with quantize option
+
+* [ ] **Expand transition template library to real DJ moves**
+
+  * [ ] `DropSwap` (cut on drop with pre-drop tension)
+  * [ ] `LoopRoll` (4→2→1 bar roll into next track)
+  * [ ] `BassKillSwap` (bass swap earlier than full swap)
+  * [ ] `BackspinExit` (optional / gated by style flag)
+  * [ ] `BreakBlend` (blend during breakdown, avoid vocal clash)
+  * [ ] Each template must output a **command timeline** (EQ/filter/gain/cue/loop) with beat-accurate scheduling
+
+* [ ] **Transition selection rules (non-LLM)**
+
+  * [ ] If vocal overlap detected → prefer breakdown/outro blends + filter sweeps
+  * [ ] If energy trajectory “building” → avoid hard cuts unless target drop is stronger
+  * [ ] If perceived tempo mismatch high → prefer longer blend + loop roll
+
+* [ ] **Autonomous AutoDJ timing overhaul**
+
+  * [ ] Replace “75% position trigger only” with: “best next window within next X seconds”
+  * [ ] Add replan loop: if window missed → pick next best anchor, don’t wait to finish track
+  * [ ] Add controller state machine: `Monitoring → Prepping → Aligning → Executing → Recovering`
+
+* [ ] **Test coverage**
+
+  * [ ] Unit tests for phrase boundary math, window generation, template expansion correctness
+  * [ ] Integration test: simulated track A/B with markers → transition schedules before end-of-track
+  * [ ] Regression test: never schedules transition in “unsafe” zones (like mid-vocal phrase if flagged)
+
+---
+
+## Phase 20: AI Performance Controls — EQ/Filter Automation + “Real Mixing” Decision Schema
+
+Goal: AI doesn’t touch EQ because it has too few “safe” knobs + no structured way to apply them. Give it DJ-grade controls with guardrails + expose them in the action schema.
+
+* [ ] **Upgrade EQ model (DJ-friendly)**
+
+  * [ ] Add **3-band isolator** mode (kills allowed): `LOW/MID/HIGH` with steep slopes
+  * [ ] Add optional **4-band** EQ (LOW/LOWMID/HIMID/HIGH) for finer shaping
+  * [ ] Add per-band **kill switches** and “soft kill” curves
+  * [ ] Add per-deck **EQ presets**: “Clean Blend”, “Club Punch”, “Vocal Focus”
+  * [ ] Engine commands:
+
+    * [ ] `SetEqBand(deck, band, gain_db)`
+    * [ ] `SetEqKill(deck, band, enabled)`
+    * [ ] `SetEqMode(deck, mode)` (classic vs isolator)
+
+* [ ] **Safe automation primitives (what AI can control)**
+
+  * [ ] **Bass swap automation** (classic DJ move)
+  * [ ] **High-pass sweep** on outgoing track during blend
+  * [ ] **Vocal ducking**: reduce mid band when vocals clash (using your vocal detection feature)
+  * [ ] **Energy shaping**: subtle gain ramps to avoid perceived loudness jumps
+
+* [ ] **AI Decision schema v2 (structured, timestamped, multi-step)**
+
+  * [ ] Replace “one transition template” with a timeline of actions:
+
+    * [ ] `actions: [{ at_ms, kind, params }]`
+    * [ ] Action kinds: `LoadTrack`, `SetTempo`, `SetGain`, `SetFilter`, `SetEqBand`, `SetEqKill`, `SetLoop`, `JumpHotCue`, `ExecuteTransitionTemplate`
+  * [ ] Add `reasoning_tags` (short enums) for debugging: `VOCAL_CLASH_AVOID`, `BASS_SWAP`, `DROP_SWAP`, etc.
+  * [ ] Add `confidence` per action group + fallback plan id
+
+* [ ] **Planner changes**
+
+  * [ ] Heuristic planner can fully generate action timelines (no LLM required for basics)
+  * [ ] LLM output becomes optional “creative layer”, constrained by schema + validation
+  * [ ] Add clamp rules:
+
+    * [ ] EQ gain limits (e.g., ±10 dB), kill only on LOW during bass swap unless explicit
+    * [ ] Filter cutoff ranges + max sweep speed
+    * [ ] Never do >N actions per 8 bars (avoid twitchy automation)
+
+* [ ] **Learning hooks (user feedback → future mixes)**
+
+  * [ ] Store user feedback per transition/action set (thumb up/down + optional tags)
+  * [ ] Add preference bias in scorer (e.g., prefers FilterSweep over DropSwap)
+
+* [ ] **UI/Debug tooling (so you can see what AI is doing)**
+
+  * [ ] “AI Mix Timeline” panel: upcoming actions with timestamps/bars
+  * [ ] Live overlay on deck UI: which bands AI is touching + current automation state
+  * [ ] “Lock controls” toggles: let user forbid AI from touching EQ/filter/tempo independently
+
+* [ ] **Reliability + safety**
+
+  * [ ] Hard “panic” rule: if silence/underrun detected → disable automation + emergency load next
+  * [ ] Action de-duplication: prevent oscillation (AI repeatedly toggling EQ every tick)
+
+---
+
+
+## Phase 21: Library Search, Sort & Filter
+- [ ] SQL-backed text search (title, artist) via `search_tracks` command
+- [ ] BPM range filter, key filter, genre/mood filter
+- [ ] Column-header click-to-sort (title, artist, BPM, key, genre, duration)
+- [ ] UI: search bar above library + filter pills/dropdowns
+- [ ] Clear filters / show all button
+
+## Phase 22: Preferences & Settings Persistence
+- [ ] Implement `get_preference()` / `set_preference()` DB methods
+- [ ] Persist AI config (API key, model) to SQL preferences table
+- [ ] Audio device enumeration (`cpal` host devices) + `get_audio_devices` command
+- [ ] Audio device selection + `set_audio_device` command (hot-swap output)
+- [ ] UI: settings panel with audio device picker, transition defaults, AutoDJ thresholds
+- [ ] Save/restore user preferences on app launch
+
+## Phase 23: Visual Polish & UX
+- [ ] Album art display in deck panels (use cached art from `get_album_art`)
+- [ ] Hot cue buttons in deck UI (set/jump/clear, color-coded)
+- [ ] Waveform hot cue markers (vertical lines at cue positions)
+- [ ] Mix history view — browse past sessions with tracklist + transitions
+- [ ] Right-click context menu on library rows (load to A/B, classify, delete)
+- [ ] Responsive layout improvements (smaller screens, collapsible panels)
+
+## Phase 24: Batch Operations & AI Polish
+- [ ] Batch classification — "Classify All" button for unclassified tracks
+- [ ] Progress indicator for batch classification (X/Y tracks done)
+- [ ] UI to view/edit AI classifications per track (inline edit or modal)
+- [ ] AI feedback loop — thumb up/down on transitions to weight future scoring
+- [ ] Set energy arc goal (build → peak → cool) as AI input parameter
+
+## Phase 25: Safety & Reliability
+- [ ] Silence detection in engine (RMS monitoring on master output)
+- [ ] Fallback ladder: silence detected → auto-load + play next track
+- [ ] End-of-track detection (audio signal, not just position %)
+- [ ] Buffer underrun counter + logging
+- [ ] Crash-safe session recovery (persist playback state, resume on relaunch)
+
+## Phase 26: Real-time Metering & Beat Tracking
+- [ ] Replace synthetic beat grid with DP beat tracker (Ellis 2007)
+- [ ] Real-time RMS/peak level meters per deck + master (UI VU meters)
+- [ ] Spectrum analyzer visualization (FFT-based, per-deck or master)
+- [ ] BPM confidence indicator in UI (show when detection is uncertain)
+
+## Phase 27: Playlist & Set Management
+- [ ] Create/save/delete playlists (tagged track collections)
+- [ ] Drag-and-drop reorder tracks within playlist
+- [ ] Load playlist into AutoDJ queue (play in order or shuffle)
+- [ ] Export set as cue sheet (tracklist with timestamps)
+- [ ] "Prepare set" mode — manually order tracks, preview transitions
+
+## Phase 28: Final Polish & Export
+- [ ] FLAC/MP3 export option (in addition to WAV)
+- [ ] Normalize exported mix (LUFS target)
+- [ ] CPU profiling + optimization pass on audio callback
+- [ ] App icon, splash screen, about dialog
+- [ ] Package for macOS (.dmg), Windows (.msi), Linux (.AppImage)
