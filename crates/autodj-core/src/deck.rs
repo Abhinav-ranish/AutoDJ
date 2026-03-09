@@ -46,6 +46,27 @@ pub struct Deck {
 
     /// Loop end position in frames.
     pub loop_end: Option<usize>,
+
+    // -- Phase 30: DJ Performance Engine --
+    /// Slip mode: when enabled, the "real" position continues advancing
+    /// even during loops/repeats, so clearing them resumes from the right spot.
+    pub slip_mode: bool,
+    /// Slip position tracks where playback *would* be without loops/repeats.
+    pub slip_position: f64,
+
+    /// Beat repeat state: if active, loops a small region.
+    pub beat_repeat_start: Option<usize>,
+    pub beat_repeat_end: Option<usize>,
+
+    /// Vinyl brake state: speed ramps from current to 0 over this many frames.
+    pub brake_remaining: u32,
+    pub brake_total: u32,
+    pub brake_initial_speed: f64,
+
+    /// Spinback state: speed ramps through 0 to negative then stops.
+    pub spinback_remaining: u32,
+    pub spinback_total: u32,
+    pub spinback_initial_speed: f64,
 }
 
 impl Deck {
@@ -62,6 +83,16 @@ impl Deck {
             filter: SvfFilter::new(sample_rate),
             loop_start: None,
             loop_end: None,
+            slip_mode: false,
+            slip_position: 0.0,
+            beat_repeat_start: None,
+            beat_repeat_end: None,
+            brake_remaining: 0,
+            brake_total: 0,
+            brake_initial_speed: 1.0,
+            spinback_remaining: 0,
+            spinback_total: 0,
+            spinback_initial_speed: 1.0,
         }
     }
 
@@ -76,6 +107,11 @@ impl Deck {
         self.state = TransportState::Paused;
         self.loop_start = None;
         self.loop_end = None;
+        self.beat_repeat_start = None;
+        self.beat_repeat_end = None;
+        self.brake_remaining = 0;
+        self.spinback_remaining = 0;
+        self.slip_position = 0.0;
         self.track_id = Some(track_id);
         self.track = Some(track);
     }
@@ -136,22 +172,56 @@ impl Deck {
             Some(t) => t,
             None => return (0.0, 0.0),
         };
+
+        // Vinyl brake: ramp speed to 0
+        if self.brake_remaining > 0 {
+            let progress = 1.0 - (self.brake_remaining as f64 / self.brake_total as f64);
+            self.speed = self.brake_initial_speed * (1.0 - progress);
+            self.brake_remaining -= 1;
+            if self.brake_remaining == 0 {
+                self.speed = 0.0;
+                self.state = TransportState::Paused;
+                self.speed = self.brake_initial_speed; // restore for next play
+                return (0.0, 0.0);
+            }
+        }
+
+        // Spinback: ramp speed through 0 to negative, then stop
+        if self.spinback_remaining > 0 {
+            let progress = 1.0 - (self.spinback_remaining as f64 / self.spinback_total as f64);
+            // Goes from +1 to -1 over the duration  
+            self.speed = self.spinback_initial_speed * (1.0 - 2.0 * progress);
+            self.spinback_remaining -= 1;
+            if self.spinback_remaining == 0 {
+                self.speed = self.spinback_initial_speed; // restore
+                self.state = TransportState::Paused;
+                return (0.0, 0.0);
+            }
+        }
  
-        // Loop: if we've reached the loop end, jump back to start
-        if let (Some(start), Some(end)) = (self.loop_start, self.loop_end) {
+        // Beat repeat: short loop region (takes priority over normal loop)
+        if let (Some(start), Some(end)) = (self.beat_repeat_start, self.beat_repeat_end) {
+            if self.position >= end as f64 || self.position < start as f64 {
+                self.position = start as f64;
+            }
+        } else if let (Some(start), Some(end)) = (self.loop_start, self.loop_end) {
+            // Normal loop
             if self.position >= end as f64 {
                 self.position = start as f64;
             }
         }
  
         let total_frames = track.total_frames();
+        if self.position < 0.0 {
+            self.position = 0.0;
+        }
         if self.position >= total_frames as f64 {
             self.state = TransportState::Paused;
             return (0.0, 0.0);
         }
  
         // Linear Interpolation
-        let idx_low = self.position.floor() as usize;
+        let idx_low = self.position.floor().max(0.0) as usize;
         let idx_high = (idx_low + 1).min(total_frames - 1);
         let frac = (self.position - idx_low as f64) as f32;
  
@@ -162,6 +232,11 @@ impl Deck {
         let r = r_low + frac * (r_high - r_low);
  
         self.position += self.speed;
+
+        // Slip mode: advance the "real" position even during loops/repeats
+        if self.slip_mode {
+            self.slip_position += self.speed.abs(); // always forward
+        }
  
         // Signal chain: EQ → Filter → Gain
         let (l, r) = self.eq.process(l, r);
@@ -221,6 +296,50 @@ impl Deck {
     /// Set filter parameters.
     pub fn set_filter(&mut self, cutoff_hz: f32, resonance: f32) {
         self.filter.set_params(cutoff_hz, resonance);
+    }
+
+    /// Start beat repeat: loop a region of `beats` beats at the current position.
+    /// `samples_per_beat` is derived from the transport clock BPM.
+    pub fn start_beat_repeat(&mut self, beats: f32, samples_per_beat: usize) {
+        let repeat_length = (beats * samples_per_beat as f32) as usize;
+        if repeat_length == 0 { return; }
+        let start = self.position as usize;
+        if self.slip_mode {
+            self.slip_position = self.position;
+        }
+        self.beat_repeat_start = Some(start);
+        self.beat_repeat_end = Some(start + repeat_length);
+    }
+
+    /// Stop beat repeat. If slip mode is on, jump to the slip position.
+    pub fn stop_beat_repeat(&mut self) {
+        self.beat_repeat_start = None;
+        self.beat_repeat_end = None;
+        if self.slip_mode {
+            self.position = self.slip_position;
+        }
+    }
+
+    /// Start vinyl brake effect.
+    pub fn start_brake(&mut self, duration_frames: u32) {
+        self.brake_initial_speed = self.speed;
+        self.brake_total = duration_frames;
+        self.brake_remaining = duration_frames;
+    }
+
+    /// Start spinback effect.
+    pub fn start_spinback(&mut self, duration_frames: u32) {
+        self.spinback_initial_speed = self.speed;
+        self.spinback_total = duration_frames;
+        self.spinback_remaining = duration_frames;
+    }
+
+    /// Enable/disable slip mode.
+    pub fn set_slip_mode(&mut self, enabled: bool) {
+        self.slip_mode = enabled;
+        if enabled {
+            self.slip_position = self.position;
+        }
     }
 }
 

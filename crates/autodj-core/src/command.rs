@@ -110,6 +110,20 @@ pub enum Command {
     // -- Phase 19: DJ-style live mixing --
     /// Seek to a position in milliseconds (for section-aware transitions).
     SeekMs { deck: DeckId, position_ms: u64 },
+
+    // -- Phase 30: DJ Performance Engine --
+    /// Beat repeat: loop the current beat for `beats` beats (1/4, 1/2, 1, 2, 4).
+    BeatRepeat { deck: DeckId, beats: f32 },
+    /// Stop beat repeat and resume normal playback.
+    BeatRepeatOff { deck: DeckId },
+    /// Enable/disable slip mode (stutters/repeats don't derail track position).
+    SetSlipMode { deck: DeckId, enabled: bool },
+    /// Vinyl brake effect: gradually slow to stop over `duration_ms`.
+    VinylBrake { deck: DeckId, duration_ms: u32 },
+    /// Spinback effect: reverse playback with deceleration over `duration_ms`.
+    Spinback { deck: DeckId, duration_ms: u32 },
+    /// Jump to a named marker position (intro, drop, break, outro, first_beat).
+    JumpToMarker { deck: DeckId, marker: String, position_ms: u64 },
 }
 
 /// A command wrapped with scheduling and source metadata.
@@ -177,7 +191,27 @@ impl CommandValidator {
                     length_bars: length_bars.clamp(1, 64),
                 })
             }
-            other @ (Command::SetEqKill { .. } | Command::SetEqMode { .. } | Command::SeekMs { .. }) => {
+            Command::BeatRepeat { deck, beats } => {
+                Some(Command::BeatRepeat {
+                    deck,
+                    beats: beats.clamp(0.25, 8.0),
+                })
+            }
+            Command::VinylBrake { deck, duration_ms } => {
+                Some(Command::VinylBrake {
+                    deck,
+                    duration_ms: duration_ms.clamp(100, 5000),
+                })
+            }
+            Command::Spinback { deck, duration_ms } => {
+                Some(Command::Spinback {
+                    deck,
+                    duration_ms: duration_ms.clamp(100, 5000),
+                })
+            }
+            other @ (Command::SetEqKill { .. } | Command::SetEqMode { .. } | Command::SeekMs { .. }
+                    | Command::BeatRepeatOff { .. } | Command::SetSlipMode { .. }
+                    | Command::JumpToMarker { .. }) => {
                 Some(other)
             }
             other => Some(other),

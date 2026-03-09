@@ -577,6 +577,28 @@ impl AudioEngine {
                 let frame = transport.ms_to_frames(*position_ms);
                 Self::get_deck_mut(*deck, deck_a, deck_b).seek(frame);
             }
+            Command::BeatRepeat { deck, beats } => {
+                let spb = transport.samples_per_beat as usize;
+                Self::get_deck_mut(*deck, deck_a, deck_b).start_beat_repeat(*beats, spb);
+            }
+            Command::BeatRepeatOff { deck } => {
+                Self::get_deck_mut(*deck, deck_a, deck_b).stop_beat_repeat();
+            }
+            Command::SetSlipMode { deck, enabled } => {
+                Self::get_deck_mut(*deck, deck_a, deck_b).set_slip_mode(*enabled);
+            }
+            Command::VinylBrake { deck, duration_ms } => {
+                let frames = transport.ms_to_frames(*duration_ms as u64) as u32;
+                Self::get_deck_mut(*deck, deck_a, deck_b).start_brake(frames);
+            }
+            Command::Spinback { deck, duration_ms } => {
+                let frames = transport.ms_to_frames(*duration_ms as u64) as u32;
+                Self::get_deck_mut(*deck, deck_a, deck_b).start_spinback(frames);
+            }
+            Command::JumpToMarker { deck, position_ms, .. } => {
+                let frame = transport.ms_to_frames(*position_ms);
+                Self::get_deck_mut(*deck, deck_a, deck_b).seek(frame);
+            }
             _ => {
                 log::debug!("Command not yet implemented: {:?}", command);
             }
