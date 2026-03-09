@@ -1,11 +1,12 @@
 //! AutoDJ Tauri application library.
 
 pub mod commands;
+pub mod conductor;
 pub mod state;
- 
+
 use state::AppState;
-use tauri::Manager;
 use tauri::Emitter;
+use tauri::Manager;
 
 /// Run the Tauri application.
 ///
@@ -85,10 +86,15 @@ pub fn run() {
             commands::jump_to_marker,
             commands::test_ai_provider,
             commands::get_ai_debug_info,
+            commands::get_conductor_state,
+            commands::set_conductor_queue,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
-            
+
+            // Spawn the backend conductor loop (owns AutoDJ state machine)
+            conductor::spawn_conductor(handle.clone());
+
             // Spawn a thread to poll engine state and emit events
             std::thread::spawn(move || {
                 loop {
@@ -99,7 +105,7 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_millis(33)); // ~30Hz
                 }
             });
-            
+
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -1,16 +1,16 @@
 use crate::state::AppState;
+use crate::state::DjMode;
+use autodj_ai::{context::build_context, planner::AiDecision, AiConfig};
 use autodj_core::buffer::TrackBuffer;
 use autodj_core::command::{Command, CommandSource, DeckId, EqBand, EqMode};
 use autodj_core::engine::EngineStateSnapshot;
 use autodj_storage::cache::hash_file;
-use autodj_storage::db::{TrackRecord, ImportStatus};
+use autodj_storage::db::{ImportStatus, TrackRecord};
 use autodj_storage::decoder;
-use autodj_ai::{AiConfig, planner::AiDecision, context::build_context};
-use crate::state::DjMode;
-use std::path::PathBuf;
-use std::sync::Arc;
 use lofty::prelude::*;
 use lofty::tag::Accessor;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::State;
 
 /// Import audio files into the library.
@@ -47,7 +47,10 @@ pub async fn import_files(
         let mut album_art_data: Option<Vec<u8>> = None;
 
         if let Ok(tagged_file) = lofty::read_from_path(&path) {
-            if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+            if let Some(tag) = tagged_file
+                .primary_tag()
+                .or_else(|| tagged_file.first_tag())
+            {
                 if let Some(t) = tag.title().as_deref() {
                     title = Some(t.to_string());
                 }
@@ -128,7 +131,14 @@ pub fn get_tracks(
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
 
     // If no filters applied, use the fast path
-    if query.is_none() && genre.is_none() && mood.is_none() && bpm_min.is_none() && bpm_max.is_none() && key_filter.is_none() && sort_by.is_none() {
+    if query.is_none()
+        && genre.is_none()
+        && mood.is_none()
+        && bpm_min.is_none()
+        && bpm_max.is_none()
+        && key_filter.is_none()
+        && sort_by.is_none()
+    {
         return db.get_all_tracks().map_err(|e| format!("DB: {e}"));
     }
 
@@ -141,7 +151,8 @@ pub fn get_tracks(
         key_filter.as_deref(),
         sort_by.as_deref(),
         sort_order.as_deref(),
-    ).map_err(|e| format!("DB: {e}"))
+    )
+    .map_err(|e| format!("DB: {e}"))
 }
 
 /// Load a track onto a deck.
@@ -159,8 +170,8 @@ pub async fn load_track(
         return Err(format!("PCM cache not found for track {track_id}"));
     }
 
-    let track_buffer = TrackBuffer::open(&pcm_path)
-        .map_err(|e| format!("Failed to open track buffer: {e}"))?;
+    let track_buffer =
+        TrackBuffer::open(&pcm_path).map_err(|e| format!("Failed to open track buffer: {e}"))?;
 
     state.load_track_to_deck(deck_id, track_id.clone(), Arc::new(track_buffer));
 
@@ -172,7 +183,13 @@ pub async fn load_track(
             if let Some(track_bpm) = track.bpm {
                 if track_bpm > 0.0 {
                     let speed = master_bpm / track_bpm;
-                    state.send_command(Command::SetSpeed { deck: deck_id, speed }, CommandSource::User);
+                    state.send_command(
+                        Command::SetSpeed {
+                            deck: deck_id,
+                            speed,
+                        },
+                        CommandSource::User,
+                    );
                 }
             }
         }
@@ -181,7 +198,10 @@ pub async fn load_track(
     // Record track play in session history
     {
         let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-        let mut session = state.current_session_id.write().map_err(|_| "Session lock error")?;
+        let mut session = state
+            .current_session_id
+            .write()
+            .map_err(|_| "Session lock error")?;
         if session.is_none() {
             if let Ok(sid) = db.create_session() {
                 *session = Some(sid);
@@ -215,28 +235,31 @@ pub fn pause(deck: DeckId, state: State<'_, AppState>) -> Result<(), String> {
 /// Set crossfader position.
 #[tauri::command]
 pub fn set_crossfader(position: f32, state: State<'_, AppState>) -> Result<(), String> {
-    state.send_command(
-        Command::SetCrossfader { position },
-        CommandSource::User,
-    );
+    state.send_command(Command::SetCrossfader { position }, CommandSource::User);
     Ok(())
 }
 
 /// Set deck gain.
 #[tauri::command]
 pub fn set_deck_gain(deck: DeckId, gain_db: f32, state: State<'_, AppState>) -> Result<(), String> {
-    state.send_command(
-        Command::SetDeckGain { deck, gain_db },
-        CommandSource::User,
-    );
+    state.send_command(Command::SetDeckGain { deck, gain_db }, CommandSource::User);
     Ok(())
 }
 
 /// Set EQ band gain for a deck.
 #[tauri::command]
-pub fn set_eq(deck: DeckId, band: EqBand, gain_db: f32, state: State<'_, AppState>) -> Result<(), String> {
+pub fn set_eq(
+    deck: DeckId,
+    band: EqBand,
+    gain_db: f32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     state.send_command(
-        Command::SetEq { deck, band, gain_db },
+        Command::SetEq {
+            deck,
+            band,
+            gain_db,
+        },
         CommandSource::User,
     );
     Ok(())
@@ -244,9 +267,18 @@ pub fn set_eq(deck: DeckId, band: EqBand, gain_db: f32, state: State<'_, AppStat
 
 /// Set filter parameters for a deck.
 #[tauri::command]
-pub fn set_filter(deck: DeckId, cutoff_hz: f32, resonance: f32, state: State<'_, AppState>) -> Result<(), String> {
+pub fn set_filter(
+    deck: DeckId,
+    cutoff_hz: f32,
+    resonance: f32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     state.send_command(
-        Command::SetFilter { deck, cutoff_hz, resonance },
+        Command::SetFilter {
+            deck,
+            cutoff_hz,
+            resonance,
+        },
         CommandSource::User,
     );
     Ok(())
@@ -256,15 +288,10 @@ pub fn set_filter(deck: DeckId, cutoff_hz: f32, resonance: f32, state: State<'_,
 #[tauri::command]
 pub fn seek(deck: DeckId, position_ms: u64, state: State<'_, AppState>) -> Result<(), String> {
     // Convert ms to beats based on actual deck BPM if available, else fallback to master
-    let bpm = state.latest_state()
-        .map(|s| s.master_bpm)
-        .unwrap_or(128.0);
-        
+    let bpm = state.latest_state().map(|s| s.master_bpm).unwrap_or(128.0);
+
     let beat = (position_ms as f64 * bpm / 60000.0) as u64;
-    state.send_command(
-        Command::Seek { deck, beat },
-        CommandSource::User,
-    );
+    state.send_command(Command::Seek { deck, beat }, CommandSource::User);
     Ok(())
 }
 
@@ -272,16 +299,25 @@ pub fn seek(deck: DeckId, position_ms: u64, state: State<'_, AppState>) -> Resul
 #[tauri::command]
 pub fn set_loop(deck: DeckId, length_bars: u32, state: State<'_, AppState>) -> Result<(), String> {
     // Calculate current beat from engine position using master BPM for now
-    let start_beat = state.latest_state()
+    let start_beat = state
+        .latest_state()
         .map(|s| {
-            let info = if deck == DeckId::A { &s.deck_a } else { &s.deck_b };
+            let info = if deck == DeckId::A {
+                &s.deck_a
+            } else {
+                &s.deck_b
+            };
             let bpm = s.master_bpm;
             (info.position_ms as f64 * bpm / 60000.0) as u64
         })
         .unwrap_or(0);
 
     state.send_command(
-        Command::SetLoop { deck, start_beat, length_bars },
+        Command::SetLoop {
+            deck,
+            start_beat,
+            length_bars,
+        },
         CommandSource::User,
     );
     Ok(())
@@ -290,37 +326,36 @@ pub fn set_loop(deck: DeckId, length_bars: u32, state: State<'_, AppState>) -> R
 /// Clear the loop on a deck.
 #[tauri::command]
 pub fn clear_loop(deck: DeckId, state: State<'_, AppState>) -> Result<(), String> {
-    state.send_command(
-        Command::ClearLoop { deck },
-        CommandSource::User,
-    );
+    state.send_command(Command::ClearLoop { deck }, CommandSource::User);
     Ok(())
 }
 
 /// Set the tempo (BPM) for a deck.
 #[tauri::command]
 pub fn set_tempo(deck: DeckId, bpm: f64, state: State<'_, AppState>) -> Result<(), String> {
-    state.send_command(
-        Command::SetTempo { deck, bpm },
-        CommandSource::User,
-    );
+    state.send_command(Command::SetTempo { deck, bpm }, CommandSource::User);
     Ok(())
 }
 
 /// Sync a deck's tempo to the master clock.
 #[tauri::command]
-pub async fn sync_to_master(deck: DeckId, track_id: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn sync_to_master(
+    deck: DeckId,
+    track_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let snapshot = state.latest_state().ok_or("Engine state unavailable")?;
     let master_bpm = snapshot.master_bpm;
 
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    let track_json = db.get_track_profile_json(&track_id)
+    let track_json = db
+        .get_track_profile_json(&track_id)
         .map_err(|e| format!("DB error: {e}"))?
         .ok_or_else(|| format!("No profile found for track {track_id}"))?;
-    
-    let profile: autodj_analysis::profile::TrackProfile = serde_json::from_str(&track_json)
-        .map_err(|e| format!("De-serialization error: {e}"))?;
-    
+
+    let profile: autodj_analysis::profile::TrackProfile =
+        serde_json::from_str(&track_json).map_err(|e| format!("De-serialization error: {e}"))?;
+
     let track_bpm = profile.tempo.bpm;
     if track_bpm <= 0.0 {
         return Err("Invalid track BPM (0)".to_string());
@@ -328,7 +363,7 @@ pub async fn sync_to_master(deck: DeckId, track_id: String, state: State<'_, App
 
     let speed = master_bpm / track_bpm;
     state.send_command(Command::SetSpeed { deck, speed }, CommandSource::User);
-    
+
     Ok(())
 }
 
@@ -351,8 +386,14 @@ pub async fn analyze_track(track_id: String, state: State<'_, AppState>) -> Resu
             _ => return Err("Track not found".to_string()),
         };
 
-        if track.import_status != ImportStatus::Ready && track.import_status != ImportStatus::Analyzed {
-            let _ = db.lock().unwrap().update_status(&track_id, ImportStatus::AnalysisFailed, Some("Track not ready"));
+        if track.import_status != ImportStatus::Ready
+            && track.import_status != ImportStatus::Analyzed
+        {
+            let _ = db.lock().unwrap().update_status(
+                &track_id,
+                ImportStatus::AnalysisFailed,
+                Some("Track not ready"),
+            );
             return Err("Track not ready".to_string());
         }
 
@@ -360,7 +401,11 @@ pub async fn analyze_track(track_id: String, state: State<'_, AppState>) -> Resu
         let buffer = match autodj_core::buffer::TrackBuffer::open(&pcm_path) {
             Ok(b) => b,
             Err(_) => {
-                let _ = db.lock().unwrap().update_status(&track_id, ImportStatus::AnalysisFailed, Some("Failed to open PCM buffer"));
+                let _ = db.lock().unwrap().update_status(
+                    &track_id,
+                    ImportStatus::AnalysisFailed,
+                    Some("Failed to open PCM buffer"),
+                );
                 return Err("Failed to open PCM buffer".to_string());
             }
         };
@@ -391,8 +436,16 @@ pub async fn analyze_track(track_id: String, state: State<'_, AppState>) -> Resu
                     profile_json: &json,
                     bpm: profile.tempo.bpm,
                     bpm_confidence: profile.tempo.confidence,
-                    perceived_tempo: profile.perceived_tempo.as_ref().map(|p| p.perceived_tempo).unwrap_or(profile.tempo.bpm),
-                    groove_type: profile.perceived_tempo.as_ref().map(|p| p.groove_type.as_str()).unwrap_or("standard"),
+                    perceived_tempo: profile
+                        .perceived_tempo
+                        .as_ref()
+                        .map(|p| p.perceived_tempo)
+                        .unwrap_or(profile.tempo.bpm),
+                    groove_type: profile
+                        .perceived_tempo
+                        .as_ref()
+                        .map(|p| p.groove_type.as_str())
+                        .unwrap_or("standard"),
                     key_name: &profile.key.key,
                     camelot: &profile.key.camelot,
                     key_confidence: profile.key.confidence,
@@ -416,11 +469,17 @@ pub async fn analyze_track(track_id: String, state: State<'_, AppState>) -> Resu
                 Ok(())
             }
             Err(e) => {
-                let _ = db.lock().unwrap().update_status(&track_id, ImportStatus::AnalysisFailed, Some(&e.to_string()));
+                let _ = db.lock().unwrap().update_status(
+                    &track_id,
+                    ImportStatus::AnalysisFailed,
+                    Some(&e.to_string()),
+                );
                 Err(e.to_string())
             }
         }
-    }).await.map_err(|e| format!("Spawn blocking error: {e}"))??;
+    })
+    .await
+    .map_err(|e| format!("Spawn blocking error: {e}"))??;
 
     Ok(())
 }
@@ -441,8 +500,16 @@ pub fn execute_transition(
 
 /// Get a track profile.
 #[tauri::command]
-pub fn get_track_profile(track_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
-    state.db.lock().map_err(|e| format!("DB lock error: {e}"))?.get_track_profile_json(&track_id).map_err(|e| e.to_string())
+pub fn get_track_profile(
+    track_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {e}"))?
+        .get_track_profile_json(&track_id)
+        .map_err(|e| e.to_string())
 }
 
 /// Get the current engine state snapshot.
@@ -454,7 +521,10 @@ pub fn get_engine_state(state: State<'_, AppState>) -> Result<Option<EngineState
 /// Set the DJ mode (manual, assisted, autodj).
 #[tauri::command]
 pub fn set_mode(mode: DjMode, state: State<'_, AppState>) -> Result<(), String> {
-    let mut current_mode = state.dj_mode.write().map_err(|_| "Failed to lock dj_mode")?;
+    let mut current_mode = state
+        .dj_mode
+        .write()
+        .map_err(|_| "Failed to lock dj_mode")?;
     *current_mode = mode;
     Ok(())
 }
@@ -472,7 +542,15 @@ pub async fn set_ai_config(config: AiConfig, state: State<'_, AppState>) -> Resu
 pub async fn request_next_track(state: State<'_, AppState>) -> Result<AiDecision, String> {
     let snapshot = state.latest_state().ok_or("Engine state unavailable")?;
 
-    let (playing_profile, playing_artist, playing_title, avail_profiles, avail_metadata, classifications, recent_tracks) = {
+    let (
+        playing_profile,
+        playing_artist,
+        playing_title,
+        avail_profiles,
+        avail_metadata,
+        classifications,
+        recent_tracks,
+    ) = {
         let db = state.db.lock().map_err(|e| format!("DB Lock error: {e}"))?;
         let tracks = db.get_all_tracks().map_err(|e| format!("DB error: {e}"))?;
 
@@ -493,8 +571,13 @@ pub async fn request_next_track(state: State<'_, AppState>) -> Result<AiDecision
 
         for track in &tracks {
             if let Ok(Some(json)) = db.get_track_profile_json(&track.id) {
-                if let Ok(profile) = serde_json::from_str::<autodj_analysis::profile::TrackProfile>(&json) {
-                    let artist = track.artist.clone().unwrap_or_else(|| "Unknown".to_string());
+                if let Ok(profile) =
+                    serde_json::from_str::<autodj_analysis::profile::TrackProfile>(&json)
+                {
+                    let artist = track
+                        .artist
+                        .clone()
+                        .unwrap_or_else(|| "Unknown".to_string());
                     let title = track.title.clone().unwrap_or_else(|| "Unknown".to_string());
                     metadata.insert(track.id.clone(), (artist.clone(), title.clone()));
 
@@ -526,20 +609,31 @@ pub async fn request_next_track(state: State<'_, AppState>) -> Result<AiDecision
         let mut class_map = std::collections::HashMap::new();
         if let Ok(class_rows) = db.get_all_classifications() {
             for (tid, genre, subgenre, mood, vibe, mix_notes) in class_rows {
-                class_map.insert(tid, autodj_ai::context::TrackClassificationData {
-                    genre: Some(genre),
-                    subgenre: Some(subgenre),
-                    mood: Some(mood),
-                    vibe: Some(vibe),
-                    mix_notes: Some(mix_notes),
-                });
+                class_map.insert(
+                    tid,
+                    autodj_ai::context::TrackClassificationData {
+                        genre: Some(genre),
+                        subgenre: Some(subgenre),
+                        mood: Some(mood),
+                        vibe: Some(vibe),
+                        mix_notes: Some(mix_notes),
+                    },
+                );
             }
         }
 
         // Get recent track history for variety scoring
         let recent = db.get_recent_track_ids(10).unwrap_or_default();
 
-        (p, cur_artist, cur_title, profiles, metadata, class_map, recent)
+        (
+            p, cur_artist, cur_title, profiles, metadata, class_map, recent,
+        )
+    };
+
+    // Get recent_templates from planner for anti-repetition context
+    let recent_templates: Vec<String> = {
+        let planner = state.ai_planner.read().await;
+        planner.recent_templates().to_vec()
     };
 
     let context = build_context(&autodj_ai::context::ContextInput {
@@ -551,27 +645,39 @@ pub async fn request_next_track(state: State<'_, AppState>) -> Result<AiDecision
         intent: "maintain",
         target_energy: 0.5,
         recent_tracks: &recent_tracks,
+        recent_templates: &recent_templates,
         available_metadata: &avail_metadata,
         classifications: &classifications,
         set_flow: None,
     });
 
     let planner = state.ai_planner.read().await;
-    let decision = planner.plan_next(&context, &playing_profile, &avail_profiles, &classifications)
+    let decision = planner
+        .plan_next(
+            &context,
+            &playing_profile,
+            &avail_profiles,
+            &classifications,
+        )
         .await
         .map_err(|e| format!("AI Planning Error: {e}"))?;
 
     // Record the decision in mix history if a track was selected
     if let Some(ref track_id) = decision.track_selection {
         let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-        let session_id = state.current_session_id.read()
+        let session_id = state
+            .current_session_id
+            .read()
             .map_err(|_| "Session lock error".to_string())?;
         if let Some(ref sid) = *session_id {
             let decision_json = serde_json::to_string(&decision).ok();
             let _ = db.record_track_play(
                 sid,
                 track_id,
-                decision.transition_plan.as_ref().map(|t| t.template_name.as_str()),
+                decision
+                    .transition_plan
+                    .as_ref()
+                    .map(|t| t.template_name.as_str()),
                 decision_json.as_deref(),
             );
         }
@@ -614,22 +720,21 @@ pub fn jump_to_hot_cue(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    let cues = db.get_hot_cues(&track_id).map_err(|e| format!("DB error: {e}"))?;
-    
+    let cues = db
+        .get_hot_cues(&track_id)
+        .map_err(|e| format!("DB error: {e}"))?;
+
     if let Some((_, position_ms, _)) = cues.iter().find(|(idx, _, _)| *idx == cue_index) {
         // Convert ms to beats
-        let bpm = state.latest_state()
-            .map(|s| s.master_bpm)
-            .unwrap_or(128.0);
-            
+        let bpm = state.latest_state().map(|s| s.master_bpm).unwrap_or(128.0);
+
         let beat = (*position_ms as f64 * bpm / 60000.0) as u64;
-        state.send_command(
-            Command::Seek { deck, beat },
-            CommandSource::User,
-        );
+        state.send_command(Command::Seek { deck, beat }, CommandSource::User);
         Ok(())
     } else {
-        Err(format!("Hot cue {cue_index} not found for track {track_id}"))
+        Err(format!(
+            "Hot cue {cue_index} not found for track {track_id}"
+        ))
     }
 }
 
@@ -654,8 +759,8 @@ pub async fn classify_track(
             .map_err(|e| format!("DB error: {e}"))?
             .ok_or_else(|| format!("No profile for track {track_id} — analyze first"))?;
 
-        let profile: autodj_analysis::TrackProfile = serde_json::from_str(&profile_json)
-            .map_err(|e| format!("Profile parse error: {e}"))?;
+        let profile: autodj_analysis::TrackProfile =
+            serde_json::from_str(&profile_json).map_err(|e| format!("Profile parse error: {e}"))?;
 
         (
             track.artist.unwrap_or_else(|| "Unknown".to_string()),
@@ -746,7 +851,8 @@ pub fn start_recording(filename: String, state: State<'_, AppState>) -> Result<(
     }
 
     // Take the consumer out of state (can only record once at a time)
-    let consumer = state.record_consumer
+    let consumer = state
+        .record_consumer
         .lock()
         .map_err(|e| format!("Lock error: {e}"))?
         .take()
@@ -798,9 +904,18 @@ pub fn stop_recording(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Get the album art path for a track, if it exists.
 #[tauri::command]
-pub fn get_album_art(track_id: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+pub fn get_album_art(
+    track_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
     if state.cache.art_exists(&track_id) {
-        Ok(Some(state.cache.art_path(&track_id).to_string_lossy().to_string()))
+        Ok(Some(
+            state
+                .cache
+                .art_path(&track_id)
+                .to_string_lossy()
+                .to_string(),
+        ))
     } else {
         Ok(None)
     }
@@ -808,9 +923,18 @@ pub fn get_album_art(track_id: String, state: State<'_, AppState>) -> Result<Opt
 
 /// Set EQ kill switch for a deck band.
 #[tauri::command]
-pub fn set_eq_kill(deck: DeckId, band: EqBand, enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+pub fn set_eq_kill(
+    deck: DeckId,
+    band: EqBand,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     state.send_command(
-        Command::SetEqKill { deck, band, enabled },
+        Command::SetEqKill {
+            deck,
+            band,
+            enabled,
+        },
         CommandSource::User,
     );
     Ok(())
@@ -819,28 +943,26 @@ pub fn set_eq_kill(deck: DeckId, band: EqBand, enabled: bool, state: State<'_, A
 /// Set EQ mode (classic/isolator) for a deck.
 #[tauri::command]
 pub fn set_eq_mode(deck: DeckId, mode: EqMode, state: State<'_, AppState>) -> Result<(), String> {
-    state.send_command(
-        Command::SetEqMode { deck, mode },
-        CommandSource::User,
-    );
+    state.send_command(Command::SetEqMode { deck, mode }, CommandSource::User);
     Ok(())
 }
 
 /// Seek a deck to exact millisecond position.
 #[tauri::command]
 pub fn seek_ms(deck: DeckId, position_ms: u64, state: State<'_, AppState>) -> Result<(), String> {
-    state.send_command(
-        Command::SeekMs { deck, position_ms },
-        CommandSource::User,
-    );
+    state.send_command(Command::SeekMs { deck, position_ms }, CommandSource::User);
     Ok(())
 }
 
 /// Get auto-cues for a track from DB.
 #[tauri::command]
-pub fn get_auto_cues(track_id: String, state: State<'_, AppState>) -> Result<Vec<(String, u64, f64)>, String> {
+pub fn get_auto_cues(
+    track_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<(String, u64, f64)>, String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.get_auto_cues(&track_id).map_err(|e| format!("DB error: {e}"))
+    db.get_auto_cues(&track_id)
+        .map_err(|e| format!("DB error: {e}"))
 }
 
 /// Submit feedback about a transition.
@@ -855,7 +977,9 @@ pub fn submit_transition_feedback(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    let session_id = state.current_session_id.read()
+    let session_id = state
+        .current_session_id
+        .read()
         .map_err(|_| "Session lock error".to_string())?;
     let sid = session_id.as_deref().unwrap_or("unknown");
     db.save_transition_feedback(
@@ -866,7 +990,8 @@ pub fn submit_transition_feedback(
         rating,
         notes.as_deref(),
         decision_json.as_deref(),
-    ).map_err(|e| format!("DB error: {e}"))
+    )
+    .map_err(|e| format!("DB error: {e}"))
 }
 
 // ─── Phase 30: DJ Performance Engine ──────────────────────────
@@ -876,7 +1001,10 @@ pub fn submit_transition_feedback(
 pub fn beat_repeat(deck: String, beats: f32, state: State<'_, AppState>) -> Result<(), String> {
     let deck_id = parse_deck(&deck)?;
     state.send_command(
-        Command::BeatRepeat { deck: deck_id, beats },
+        Command::BeatRepeat {
+            deck: deck_id,
+            beats,
+        },
         CommandSource::User,
     );
     Ok(())
@@ -886,16 +1014,26 @@ pub fn beat_repeat(deck: String, beats: f32, state: State<'_, AppState>) -> Resu
 #[tauri::command]
 pub fn beat_repeat_off(deck: String, state: State<'_, AppState>) -> Result<(), String> {
     let deck_id = parse_deck(&deck)?;
-    state.send_command(Command::BeatRepeatOff { deck: deck_id }, CommandSource::User);
+    state.send_command(
+        Command::BeatRepeatOff { deck: deck_id },
+        CommandSource::User,
+    );
     Ok(())
 }
 
 /// Toggle slip mode on a deck.
 #[tauri::command]
-pub fn set_slip_mode(deck: String, enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+pub fn set_slip_mode(
+    deck: String,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let deck_id = parse_deck(&deck)?;
     state.send_command(
-        Command::SetSlipMode { deck: deck_id, enabled },
+        Command::SetSlipMode {
+            deck: deck_id,
+            enabled,
+        },
         CommandSource::User,
     );
     Ok(())
@@ -903,10 +1041,17 @@ pub fn set_slip_mode(deck: String, enabled: bool, state: State<'_, AppState>) ->
 
 /// Vinyl brake effect.
 #[tauri::command]
-pub fn vinyl_brake(deck: String, duration_ms: u32, state: State<'_, AppState>) -> Result<(), String> {
+pub fn vinyl_brake(
+    deck: String,
+    duration_ms: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let deck_id = parse_deck(&deck)?;
     state.send_command(
-        Command::VinylBrake { deck: deck_id, duration_ms },
+        Command::VinylBrake {
+            deck: deck_id,
+            duration_ms,
+        },
         CommandSource::User,
     );
     Ok(())
@@ -917,7 +1062,10 @@ pub fn vinyl_brake(deck: String, duration_ms: u32, state: State<'_, AppState>) -
 pub fn spinback(deck: String, duration_ms: u32, state: State<'_, AppState>) -> Result<(), String> {
     let deck_id = parse_deck(&deck)?;
     state.send_command(
-        Command::Spinback { deck: deck_id, duration_ms },
+        Command::Spinback {
+            deck: deck_id,
+            duration_ms,
+        },
         CommandSource::User,
     );
     Ok(())
@@ -925,10 +1073,19 @@ pub fn spinback(deck: String, duration_ms: u32, state: State<'_, AppState>) -> R
 
 /// Jump to a named marker position.
 #[tauri::command]
-pub fn jump_to_marker(deck: String, marker: String, position_ms: u64, state: State<'_, AppState>) -> Result<(), String> {
+pub fn jump_to_marker(
+    deck: String,
+    marker: String,
+    position_ms: u64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let deck_id = parse_deck(&deck)?;
     state.send_command(
-        Command::JumpToMarker { deck: deck_id, marker, position_ms },
+        Command::JumpToMarker {
+            deck: deck_id,
+            marker,
+            position_ms,
+        },
         CommandSource::User,
     );
     Ok(())
@@ -943,17 +1100,26 @@ pub async fn test_ai_provider(state: State<'_, AppState>) -> Result<String, Stri
     let config = planner.config().clone();
     drop(planner);
 
-    if config.api_key.is_none() || config.api_key.as_deref() == Some("") {
+    // Ollama is local inference — no API key needed
+    if config.provider != "ollama"
+        && (config.api_key.is_none() || config.api_key.as_deref() == Some(""))
+    {
         return Err("No API key configured".to_string());
     }
 
     let client = autodj_ai::llm::LlmClient::new();
-    match client.query(
-        "You are a test assistant. Reply with exactly: {\"status\": \"ok\"}",
-        "health check",
-        &config,
-    ).await {
-        Ok(resp) => Ok(format!("Provider '{}' responded: {}", config.provider, resp)),
+    match client
+        .query(
+            "You are a test assistant. Reply with exactly: {\"status\": \"ok\"}",
+            "health check",
+            &config,
+        )
+        .await
+    {
+        Ok(resp) => Ok(format!(
+            "Provider '{}' responded: {}",
+            config.provider, resp
+        )),
         Err(e) => Err(format!("Provider '{}' failed: {}", config.provider, e)),
     }
 }
@@ -970,7 +1136,37 @@ pub async fn get_ai_debug_info(state: State<'_, AppState>) -> Result<serde_json:
 
     let deck_a_playing = snapshot.deck_a.state == "playing";
     let playing_deck = if deck_a_playing { "A" } else { "B" };
-    let playing_snap = if deck_a_playing { &snapshot.deck_a } else { &snapshot.deck_b };
+    let playing_snap = if deck_a_playing {
+        &snapshot.deck_a
+    } else {
+        &snapshot.deck_b
+    };
+
+    let active = {
+        let mode = state
+            .dj_mode
+            .read()
+            .map_err(|_| "Mode lock error".to_string())?;
+        *mode == DjMode::Autodj
+    };
+
+    // Include structured conductor state in debug info
+    let conductor = state.conductor.read().await;
+    let conductor_snapshot = conductor.snapshot(active);
+    drop(conductor);
+    let conductor_phase = format!("{:?}", conductor_snapshot.phase).to_lowercase();
+    let conductor_trigger = conductor_snapshot.trigger_reason.clone();
+    let conductor_message = conductor_snapshot.message.clone();
+    let conductor_error = conductor_snapshot.error.clone();
+    let decision_source = conductor_snapshot.decision_source.clone();
+    let fallback_reason = conductor_snapshot.fallback_reason.clone();
+    let template_chosen = conductor_snapshot.template_chosen.clone();
+    let template_scores = conductor_snapshot.template_scores.clone();
+    let entry_marker = conductor_snapshot.entry_marker.clone();
+    let confidence = conductor_snapshot.confidence;
+    let reasoning_tags = conductor_snapshot.reasoning_tags.clone();
+    let conductor_trigger_meta = conductor_snapshot.trigger_meta.clone();
+    let conductor_decision_meta = conductor_snapshot.decision_meta.clone();
 
     Ok(serde_json::json!({
         "provider": config.provider,
@@ -986,7 +1182,58 @@ pub async fn get_ai_debug_info(state: State<'_, AppState>) -> Result<serde_json:
         "bar_number": snapshot.bar_number,
         "silence_frames": snapshot.silence_frames,
         "crossfader": snapshot.crossfader,
+        // Conductor runtime state
+        "conductor_phase": conductor_phase,
+        "conductor_trigger": conductor_trigger,
+        "conductor_message": conductor_message,
+        "conductor_error": conductor_error,
+        "decision_source": decision_source,
+        "fallback_reason": fallback_reason,
+        "template_chosen": template_chosen,
+        "template_scores": template_scores,
+        "entry_marker": entry_marker,
+        "confidence": confidence,
+        "reasoning_tags": reasoning_tags,
+        "conductor_trigger_meta": conductor_trigger_meta,
+        "conductor_decision_meta": conductor_decision_meta,
     }))
+}
+
+/// Get the current conductor snapshot.
+#[tauri::command]
+pub async fn get_conductor_state(
+    state: State<'_, AppState>,
+) -> Result<crate::conductor::ConductorSnapshot, String> {
+    let active = {
+        let mode = state.dj_mode.read().map_err(|_| "Mode lock error")?;
+        *mode == DjMode::Autodj
+    };
+
+    let cond = state.conductor.read().await;
+    let mut snap = cond.snapshot(active);
+
+    // Resolve pending track title
+    if let Some(ref tid) = snap.pending_track_id {
+        if let Ok(db) = state.db.lock() {
+            if let Ok(Some(track)) = db.get_track(tid) {
+                snap.pending_track_title = track.title;
+            }
+        }
+    }
+
+    Ok(snap)
+}
+
+/// Set the conductor's playlist queue for AutoDJ mode.
+#[tauri::command]
+pub async fn set_conductor_queue(
+    track_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut cond = state.conductor.write().await;
+    cond.queue = track_ids;
+    cond.queue_index = 0;
+    Ok(())
 }
 
 fn parse_deck(s: &str) -> Result<DeckId, String> {
@@ -1008,9 +1255,14 @@ pub fn get_preference(key: String, state: State<'_, AppState>) -> Result<Option<
 
 /// Set a preference value.
 #[tauri::command]
-pub fn set_preference(key: String, value: String, state: State<'_, AppState>) -> Result<(), String> {
+pub fn set_preference(
+    key: String,
+    value: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.set_preference(&key, &value).map_err(|e| format!("DB: {e}"))
+    db.set_preference(&key, &value)
+        .map_err(|e| format!("DB: {e}"))
 }
 
 /// Get all preferences.
@@ -1023,13 +1275,12 @@ pub fn get_all_preferences(state: State<'_, AppState>) -> Result<Vec<(String, St
 /// List available audio output devices.
 #[tauri::command]
 pub fn get_audio_devices() -> Result<Vec<String>, String> {
-    use cpal::traits::{HostTrait, DeviceTrait};
+    use cpal::traits::{DeviceTrait, HostTrait};
     let host = cpal::default_host();
-    let devices = host.output_devices()
+    let devices = host
+        .output_devices()
         .map_err(|e| format!("Failed to enumerate devices: {e}"))?;
-    let names: Vec<String> = devices
-        .filter_map(|d| d.name().ok())
-        .collect();
+    let names: Vec<String> = devices.filter_map(|d| d.name().ok()).collect();
     Ok(names)
 }
 
@@ -1037,63 +1288,97 @@ pub fn get_audio_devices() -> Result<Vec<String>, String> {
 
 /// Create a new playlist.
 #[tauri::command]
-pub fn create_playlist(name: String, description: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
+pub fn create_playlist(
+    name: String,
+    description: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.create_playlist(&name, description.as_deref()).map_err(|e| format!("DB: {e}"))
+    db.create_playlist(&name, description.as_deref())
+        .map_err(|e| format!("DB: {e}"))
 }
 
 /// Get all playlists.
 #[tauri::command]
-pub fn get_playlists(state: State<'_, AppState>) -> Result<Vec<autodj_storage::db::PlaylistRecord>, String> {
+pub fn get_playlists(
+    state: State<'_, AppState>,
+) -> Result<Vec<autodj_storage::db::PlaylistRecord>, String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
     db.get_all_playlists().map_err(|e| format!("DB: {e}"))
 }
 
 /// Rename a playlist.
 #[tauri::command]
-pub fn rename_playlist(playlist_id: String, name: String, state: State<'_, AppState>) -> Result<(), String> {
+pub fn rename_playlist(
+    playlist_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.rename_playlist(&playlist_id, &name).map_err(|e| format!("DB: {e}"))
+    db.rename_playlist(&playlist_id, &name)
+        .map_err(|e| format!("DB: {e}"))
 }
 
 /// Delete a playlist.
 #[tauri::command]
 pub fn delete_playlist(playlist_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.delete_playlist(&playlist_id).map_err(|e| format!("DB: {e}"))
+    db.delete_playlist(&playlist_id)
+        .map_err(|e| format!("DB: {e}"))
 }
 
 /// Add a track to a playlist.
 #[tauri::command]
-pub fn add_track_to_playlist(playlist_id: String, track_id: String, state: State<'_, AppState>) -> Result<(), String> {
+pub fn add_track_to_playlist(
+    playlist_id: String,
+    track_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.add_track_to_playlist(&playlist_id, &track_id).map_err(|e| format!("DB: {e}"))
+    db.add_track_to_playlist(&playlist_id, &track_id)
+        .map_err(|e| format!("DB: {e}"))
 }
 
 /// Remove a track from a playlist.
 #[tauri::command]
-pub fn remove_track_from_playlist(playlist_id: String, track_id: String, state: State<'_, AppState>) -> Result<(), String> {
+pub fn remove_track_from_playlist(
+    playlist_id: String,
+    track_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.remove_track_from_playlist(&playlist_id, &track_id).map_err(|e| format!("DB: {e}"))
+    db.remove_track_from_playlist(&playlist_id, &track_id)
+        .map_err(|e| format!("DB: {e}"))
 }
 
 /// Reorder tracks in a playlist.
 #[tauri::command]
-pub fn reorder_playlist(playlist_id: String, track_ids: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+pub fn reorder_playlist(
+    playlist_id: String,
+    track_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.reorder_playlist(&playlist_id, &track_ids).map_err(|e| format!("DB: {e}"))
+    db.reorder_playlist(&playlist_id, &track_ids)
+        .map_err(|e| format!("DB: {e}"))
 }
 
 /// Get tracks in a playlist.
 #[tauri::command]
-pub fn get_playlist_tracks(playlist_id: String, state: State<'_, AppState>) -> Result<Vec<TrackRecord>, String> {
+pub fn get_playlist_tracks(
+    playlist_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<TrackRecord>, String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.get_playlist_tracks(&playlist_id).map_err(|e| format!("DB: {e}"))
+    db.get_playlist_tracks(&playlist_id)
+        .map_err(|e| format!("DB: {e}"))
 }
 
 /// Get all sessions for cue sheet export.
 #[tauri::command]
-pub fn get_sessions(state: State<'_, AppState>) -> Result<Vec<autodj_storage::db::SessionRecord>, String> {
+pub fn get_sessions(
+    state: State<'_, AppState>,
+) -> Result<Vec<autodj_storage::db::SessionRecord>, String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
     db.get_all_sessions().map_err(|e| format!("DB: {e}"))
 }
@@ -1102,7 +1387,9 @@ pub fn get_sessions(state: State<'_, AppState>) -> Result<Vec<autodj_storage::db
 #[tauri::command]
 pub fn export_cue_sheet(session_id: String, state: State<'_, AppState>) -> Result<String, String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    let entries = db.get_session_mix_history(&session_id).map_err(|e| format!("DB: {e}"))?;
+    let entries = db
+        .get_session_mix_history(&session_id)
+        .map_err(|e| format!("DB: {e}"))?;
     if entries.is_empty() {
         return Err("No mix history for this session".to_string());
     }
@@ -1117,9 +1404,20 @@ pub fn export_cue_sheet(session_id: String, state: State<'_, AppState>) -> Resul
         let artist = entry.artist.as_deref().unwrap_or("Unknown");
         let title = entry.title.as_deref().unwrap_or("Unknown");
         let transition = entry.transition_type.as_deref().unwrap_or("");
-        let trans_str = if transition.is_empty() { String::new() } else { format!(" [{}]", transition) };
-        lines.push(format!("{:02}. [{:02}:{:02}] {} — {}{}", i + 1, mins, secs, artist, title, trans_str));
+        let trans_str = if transition.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", transition)
+        };
+        lines.push(format!(
+            "{:02}. [{:02}:{:02}] {} — {}{}",
+            i + 1,
+            mins,
+            secs,
+            artist,
+            title,
+            trans_str
+        ));
     }
     Ok(lines.join("\n"))
 }
-
