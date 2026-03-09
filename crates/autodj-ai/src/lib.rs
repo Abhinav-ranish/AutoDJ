@@ -8,6 +8,7 @@ pub mod classifier;
 pub mod context;
 pub mod llm;
 pub mod planner;
+pub mod quality;
 pub mod scorer;
 
 use serde::{Deserialize, Serialize};
