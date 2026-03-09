@@ -1647,3 +1647,558 @@ body {
     opacity: 1;
   }
 }
+
+/* ================================================================
+   Phase 27: VU Meters, Spectrum Analyzer, BPM Confidence
+   ================================================================ */
+
+/* -- Waveform + VU Meter Row -- */
+.waveform-meter-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  height: 80px;
+}
+
+.waveform-meter-row .waveform-canvas {
+  flex: 1;
+  min-width: 0;
+}
+
+/* -- VU Meter -- */
+.vu-meter {
+  width: 8px;
+  flex-shrink: 0;
+}
+
+.vu-meter-track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-deepest);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.vu-meter-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  border-radius: 2px;
+  transition: height 60ms linear;
+}
+
+.vu-meter-peak {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  border-radius: 1px;
+  transition: bottom 120ms ease-out;
+}
+
+/* -- Metering Strip (between decks and crossfader) -- */
+.metering-strip {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--gap-sm);
+  height: 48px;
+  padding: 0 var(--gap-md);
+}
+
+.metering-strip > .vu-meter {
+  width: 6px;
+}
+
+/* -- Spectrum Analyzer -- */
+.spectrum-analyzer {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  flex: 1;
+  max-width: 320px;
+  height: 100%;
+}
+
+.spectrum-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+}
+
+.spectrum-bar-track {
+  flex: 1;
+  width: 100%;
+  background: var(--bg-deepest);
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+}
+
+.spectrum-bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(
+    to top,
+    var(--accent-a-dim),
+    var(--accent-a) 60%,
+    var(--status-error)
+  );
+  transition: height 80ms linear;
+  min-height: 1px;
+}
+
+.spectrum-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+/* -- BPM Confidence Badge -- */
+.bpm-confidence-badge {
+  font-size: 10px;
+  margin-left: 4px;
+  letter-spacing: 0;
+}
+
+.bpm-conf-high {
+  color: var(--status-ready);
+}
+
+.bpm-conf-mid {
+  color: #ffb300;
+}
+
+.bpm-conf-low {
+  color: var(--status-error);
+}
+
+/* ================================================================
+   Phase 28: Playlist & Set Management
+   ================================================================ */
+
+.playlist-view {
+  display: flex;
+  height: 100%;
+  gap: 1px;
+  background: var(--bg-deepest);
+}
+
+.playlist-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: var(--bg-deep);
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.playlist-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+}
+
+.playlist-sidebar-header h3 {
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.playlist-export-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.playlist-export-btn:hover {
+  opacity: 1;
+}
+
+.playlist-create {
+  display: flex;
+  gap: 6px;
+  padding: 0 14px 10px;
+}
+
+.playlist-name-input {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-body);
+}
+
+.playlist-name-input::placeholder {
+  color: var(--text-muted);
+}
+
+.playlist-create-btn {
+  background: var(--accent-a);
+  border: none;
+  border-radius: 4px;
+  color: var(--bg-deepest);
+  font-weight: 700;
+  font-size: 16px;
+  width: 30px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.playlist-create-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.playlist-create-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.playlist-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.playlist-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.12s;
+  border-left: 3px solid transparent;
+}
+
+.playlist-item:hover {
+  background: var(--bg-surface);
+}
+
+.playlist-item.selected {
+  background: var(--bg-surface);
+  border-left-color: var(--accent-a);
+}
+
+.playlist-item-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlist-item-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 20px;
+  text-align: right;
+}
+
+.playlist-item-edit,
+.playlist-item-delete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 2px;
+}
+
+.playlist-item:hover .playlist-item-edit,
+.playlist-item:hover .playlist-item-delete {
+  opacity: 0.5;
+}
+
+.playlist-item-edit:hover,
+.playlist-item-delete:hover {
+  opacity: 1 !important;
+}
+
+.playlist-rename-input {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--accent-a);
+  border-radius: 3px;
+  padding: 3px 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-body);
+}
+
+.playlist-empty {
+  padding: 20px 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.playlist-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-base);
+  min-width: 0;
+}
+
+.playlist-content-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.playlist-content-header h3 {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.playlist-track-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.playlist-queue-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.playlist-queue-btn:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent-a);
+}
+
+.playlist-queue-btn.shuffle:hover {
+  border-color: var(--accent-b);
+}
+
+.playlist-queue-status {
+  padding: 6px 16px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--accent-a);
+  background: rgba(0, 212, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.playlist-tracks {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.playlist-tracks-header {
+  display: grid;
+  grid-template-columns: 36px 2fr 1.5fr 70px 60px 70px 90px;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.playlist-track-row {
+  display: grid;
+  grid-template-columns: 36px 2fr 1.5fr 70px 60px 70px 90px;
+  gap: 8px;
+  padding: 7px 16px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--bg-deep);
+  cursor: grab;
+  transition: background 0.12s;
+}
+
+.playlist-track-row:hover {
+  background: var(--bg-surface);
+}
+
+.playlist-track-row.dragging {
+  opacity: 0.4;
+  background: var(--bg-elevated);
+}
+
+.pl-col-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.pl-col-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pl-col-artist {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pl-col-bpm,
+.pl-col-key,
+.pl-col-dur {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.pl-col-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.playlist-remove-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.playlist-remove-btn:hover {
+  color: var(--status-error);
+  border-color: var(--status-error);
+}
+
+.playlist-empty-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 14px;
+  gap: 8px;
+}
+
+/* Context menu submenu */
+.context-submenu {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  min-width: 140px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 1001;
+}
+
+.context-submenu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.context-submenu button:hover {
+  background: var(--bg-surface);
+}
+
+/* Cue sheet export panel */
+.cue-sheet-panel {
+  max-width: 500px;
+  text-align: left;
+}
+
+.cue-sheet-panel h3 {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.session-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.session-item:hover {
+  border-color: var(--accent-a);
+}
+
+.session-info {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.cue-sheet-output {
+  margin-top: 12px;
+  background: var(--bg-deepest);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.cue-sheet-output pre {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  margin: 0 0 10px;
+  line-height: 1.6;
+}

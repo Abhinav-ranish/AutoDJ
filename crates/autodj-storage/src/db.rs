@@ -81,6 +81,39 @@ pub struct TrackRecord {
     pub vibe: Option<String>,
 }
 
+/// A playlist record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistRecord {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub track_count: i64,
+}
+
+/// A mix history entry (for cue sheet export).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MixHistoryEntry {
+    pub id: String,
+    pub track_id: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub transition_type: Option<String>,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+}
+
+/// A session record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRecord {
+    pub id: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub track_count: Option<i64>,
+    pub total_duration_ms: Option<i64>,
+}
+
 /// Data needed to save a track profile to the database.
 pub struct ProfileData<'a> {
     pub track_id: &'a str,
@@ -221,6 +254,24 @@ impl Database {
                 decision_json   TEXT,
                 created_at      INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS playlists (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                description TEXT,
+                created_at  INTEGER NOT NULL,
+                updated_at  INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS playlist_tracks (
+                playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                track_id    TEXT NOT NULL REFERENCES tracks(id),
+                position    INTEGER NOT NULL,
+                added_at    INTEGER NOT NULL,
+                PRIMARY KEY (playlist_id, track_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_playlist_tracks_pos ON playlist_tracks(playlist_id, position);
             ",
         )?;
 
@@ -803,6 +854,224 @@ impl Database {
         )?;
         Ok(())
     }
+    // ─── Playlists ────────────────────────────────────────────────
+
+    /// Create a new playlist. Returns the playlist ID.
+    pub fn create_playlist(&self, name: &str, description: Option<&str>) -> Result<String, DbError> {
+        let id = format!("pl_{:012x}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() & 0xFFFFFFFFFFFF);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "INSERT INTO playlists (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+            params![id, name, description, now],
+        )?;
+        Ok(id)
+    }
+
+    /// Get all playlists.
+    pub fn get_all_playlists(&self) -> Result<Vec<PlaylistRecord>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
+                    (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id)
+             FROM playlists p ORDER BY p.updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(PlaylistRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+                track_count: row.get(5)?,
+            })
+        })?;
+        let mut playlists = Vec::new();
+        for row in rows {
+            playlists.push(row?);
+        }
+        Ok(playlists)
+    }
+
+    /// Rename a playlist.
+    pub fn rename_playlist(&self, playlist_id: &str, name: &str) -> Result<(), DbError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "UPDATE playlists SET name=?2, updated_at=?3 WHERE id=?1",
+            params![playlist_id, name, now],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a playlist and its track associations.
+    pub fn delete_playlist(&self, playlist_id: &str) -> Result<(), DbError> {
+        self.conn.execute("DELETE FROM playlist_tracks WHERE playlist_id=?1", params![playlist_id])?;
+        self.conn.execute("DELETE FROM playlists WHERE id=?1", params![playlist_id])?;
+        Ok(())
+    }
+
+    /// Add a track to a playlist (appended at end).
+    pub fn add_track_to_playlist(&self, playlist_id: &str, track_id: &str) -> Result<(), DbError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let max_pos: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlist_id=?1",
+            params![playlist_id],
+            |row| row.get(0),
+        )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position, added_at) VALUES (?1, ?2, ?3, ?4)",
+            params![playlist_id, track_id, max_pos + 1, now],
+        )?;
+        self.touch_playlist(playlist_id)?;
+        Ok(())
+    }
+
+    /// Remove a track from a playlist.
+    pub fn remove_track_from_playlist(&self, playlist_id: &str, track_id: &str) -> Result<(), DbError> {
+        self.conn.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id=?1 AND track_id=?2",
+            params![playlist_id, track_id],
+        )?;
+        // Re-compact positions
+        self.reindex_playlist(playlist_id)?;
+        self.touch_playlist(playlist_id)?;
+        Ok(())
+    }
+
+    /// Reorder tracks in a playlist. `track_ids` is the full ordered list.
+    pub fn reorder_playlist(&self, playlist_id: &str, track_ids: &[String]) -> Result<(), DbError> {
+        for (i, tid) in track_ids.iter().enumerate() {
+            self.conn.execute(
+                "UPDATE playlist_tracks SET position=?3 WHERE playlist_id=?1 AND track_id=?2",
+                params![playlist_id, tid, i as i64],
+            )?;
+        }
+        self.touch_playlist(playlist_id)?;
+        Ok(())
+    }
+
+    /// Get all tracks in a playlist, ordered by position.
+    pub fn get_playlist_tracks(&self, playlist_id: &str) -> Result<Vec<TrackRecord>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.perceived_tempo, p.groove_type, p.key_name, p.lufs, p.genre, p.mood, p.vibe
+             FROM playlist_tracks pt
+             JOIN tracks t ON pt.track_id = t.id
+             LEFT JOIN track_profiles p ON t.id = p.track_id
+             WHERE pt.playlist_id = ?1
+             ORDER BY pt.position ASC",
+        )?;
+        let rows = stmt.query_map(params![playlist_id], |row| {
+            Ok(TrackRecord {
+                id: row.get(0)?,
+                file_hash: row.get(1)?,
+                original_path: row.get(2)?,
+                title: row.get(3)?,
+                artist: row.get(4)?,
+                duration_ms: row.get(5)?,
+                import_status: row.get(6)?,
+                error_message: row.get(7)?,
+                bpm: row.get(8)?,
+                perceived_tempo: row.get(9)?,
+                groove_type: row.get(10)?,
+                key: row.get(11)?,
+                lufs: row.get(12)?,
+                genre: row.get(13)?,
+                mood: row.get(14)?,
+                vibe: row.get(15)?,
+            })
+        })?;
+        let mut tracks = Vec::new();
+        for row in rows {
+            tracks.push(row?);
+        }
+        Ok(tracks)
+    }
+
+    /// Get mix history entries for a session, for cue sheet export.
+    pub fn get_session_mix_history(&self, session_id: &str) -> Result<Vec<MixHistoryEntry>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT m.id, m.track_id, m.started_at, m.ended_at, m.transition_type, t.title, t.artist
+             FROM mix_history m
+             LEFT JOIN tracks t ON m.track_id = t.id
+             WHERE m.session_id = ?1
+             ORDER BY m.started_at ASC",
+        )?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok(MixHistoryEntry {
+                id: row.get(0)?,
+                track_id: row.get(1)?,
+                started_at: row.get(2)?,
+                ended_at: row.get(3)?,
+                transition_type: row.get(4)?,
+                title: row.get(5)?,
+                artist: row.get(6)?,
+            })
+        })?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    /// Get all sessions.
+    pub fn get_all_sessions(&self) -> Result<Vec<SessionRecord>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, started_at, ended_at, track_count, total_duration_ms FROM sessions ORDER BY started_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SessionRecord {
+                id: row.get(0)?,
+                started_at: row.get(1)?,
+                ended_at: row.get(2)?,
+                track_count: row.get(3)?,
+                total_duration_ms: row.get(4)?,
+            })
+        })?;
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+        Ok(sessions)
+    }
+
+    fn touch_playlist(&self, playlist_id: &str) -> Result<(), DbError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "UPDATE playlists SET updated_at=?2 WHERE id=?1",
+            params![playlist_id, now],
+        )?;
+        Ok(())
+    }
+
+    fn reindex_playlist(&self, playlist_id: &str) -> Result<(), DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT track_id FROM playlist_tracks WHERE playlist_id=?1 ORDER BY position ASC",
+        )?;
+        let rows = stmt.query_map(params![playlist_id], |row| row.get::<_, String>(0))?;
+        let track_ids: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+        for (i, tid) in track_ids.iter().enumerate() {
+            self.conn.execute(
+                "UPDATE playlist_tracks SET position=?3 WHERE playlist_id=?1 AND track_id=?2",
+                params![playlist_id, tid, i as i64],
+            )?;
+        }
+        Ok(())
+    }
+
     // ─── Preferences ──────────────────────────────────────────────
 
     /// Get a preference value by key.

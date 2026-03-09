@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useRef, useMemo } from "react";
-import { useStore, EngineState, DjMode, AutodjStatus } from "./store";
+import { useStore, EngineState, DjMode, AutodjStatus, PlaylistRecord, SessionRecord } from "./store";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -31,9 +31,10 @@ function formatGroove(groove: string): string {
 // ─── Library View ────────────────────────────────────────────────
 
 function LibraryView() {
-    const { tracks, importing, fetchTracks, importFiles, loadTrack, clearLibrary, analyzingTracks, libraryFilters, setLibraryFilters, clearLibraryFilters, analyzeTrack, classifyTrack, classifyAll, batchClassifying, batchClassifyProgress, aiConfig } = useStore();
+    const { tracks, importing, fetchTracks, importFiles, loadTrack, clearLibrary, analyzingTracks, libraryFilters, setLibraryFilters, clearLibraryFilters, analyzeTrack, classifyTrack, classifyAll, batchClassifying, batchClassifyProgress, aiConfig, playlists, fetchPlaylists, addTrackToPlaylist } = useStore();
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; trackId: string } | null>(null);
+    const [playlistSubmenu, setPlaylistSubmenu] = useState(false);
 
     useEffect(() => {
         fetchTracks();
@@ -322,8 +323,255 @@ function LibraryView() {
                     <button onClick={() => { classifyTrack(contextMenu.trackId); setContextMenu(null); }}>
                         Classify with AI
                     </button>
+                    <div className="context-menu-divider" />
+                    <button
+                        onMouseEnter={() => { if (!playlistSubmenu) { fetchPlaylists(); setPlaylistSubmenu(true); } }}
+                        onMouseLeave={() => setPlaylistSubmenu(false)}
+                        style={{ position: "relative" }}
+                    >
+                        Add to Playlist ▸
+                        {playlistSubmenu && (
+                            <div className="context-submenu">
+                                {playlists.length === 0 ? (
+                                    <span style={{ padding: "4px 8px", color: "var(--text-muted)", fontSize: "12px" }}>No playlists</span>
+                                ) : playlists.map(pl => (
+                                    <button key={pl.id} onClick={(e) => {
+                                        e.stopPropagation();
+                                        addTrackToPlaylist(pl.id, contextMenu.trackId);
+                                        setContextMenu(null);
+                                        setPlaylistSubmenu(false);
+                                    }}>
+                                        {pl.name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </button>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ─── Playlist View ───────────────────────────────────────────────
+
+function PlaylistView() {
+    const { playlists, fetchPlaylists, createPlaylist, renamePlaylist, deletePlaylist, selectedPlaylistId, selectPlaylist, playlistTracks, removeTrackFromPlaylist, reorderPlaylist, loadTrack, loadPlaylistToQueue, autodjQueue, autodjQueueIndex, getSessions, exportCueSheet } = useStore();
+    const [newName, setNewName] = useState("");
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editName, setEditName] = useState("");
+    const [dragIdx, setDragIdx] = useState<number | null>(null);
+    const [showExport, setShowExport] = useState(false);
+    const [sessions, setSessions] = useState<SessionRecord[]>([]);
+    const [cueSheet, setCueSheet] = useState<string | null>(null);
+
+    useEffect(() => { fetchPlaylists(); }, [fetchPlaylists]);
+
+    const handleCreate = async () => {
+        const name = newName.trim();
+        if (!name) return;
+        await createPlaylist(name);
+        setNewName("");
+    };
+
+    const handleRename = async (id: string) => {
+        const name = editName.trim();
+        if (!name) return;
+        await renamePlaylist(id, name);
+        setEditingId(null);
+        setEditName("");
+    };
+
+    const handleDelete = async (id: string) => {
+        if (!confirm("Delete this playlist?")) return;
+        await deletePlaylist(id);
+    };
+
+    // Drag-and-drop reorder
+    const handleDragStart = (idx: number) => setDragIdx(idx);
+    const handleDragOver = (e: React.DragEvent, _idx: number) => e.preventDefault();
+    const handleDrop = async (targetIdx: number) => {
+        if (dragIdx === null || dragIdx === targetIdx || !selectedPlaylistId) return;
+        const ids = playlistTracks.map(t => t.id);
+        const [moved] = ids.splice(dragIdx, 1);
+        ids.splice(targetIdx, 0, moved);
+        await reorderPlaylist(selectedPlaylistId, ids);
+        setDragIdx(null);
+    };
+
+    const handleLoadQueue = (shuffle: boolean) => {
+        if (!selectedPlaylistId) return;
+        loadPlaylistToQueue(selectedPlaylistId, shuffle);
+    };
+
+    const handleShowExport = async () => {
+        const s = await getSessions();
+        setSessions(s);
+        setShowExport(true);
+        setCueSheet(null);
+    };
+
+    const handleExport = async (sessionId: string) => {
+        const text = await exportCueSheet(sessionId);
+        setCueSheet(text);
+    };
+
+    const selectedPlaylist = playlists.find(p => p.id === selectedPlaylistId);
+    const queueRemaining = autodjQueue.length - autodjQueueIndex;
+
+    return (
+        <div className="playlist-view">
+            <div className="playlist-sidebar">
+                <div className="playlist-sidebar-header">
+                    <h3>Playlists</h3>
+                    <button className="playlist-export-btn" onClick={handleShowExport} title="Export cue sheet">📋</button>
+                </div>
+                <div className="playlist-create">
+                    <input
+                        type="text"
+                        placeholder="New playlist..."
+                        value={newName}
+                        onChange={e => setNewName(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && handleCreate()}
+                        className="playlist-name-input"
+                    />
+                    <button onClick={handleCreate} disabled={!newName.trim()} className="playlist-create-btn">+</button>
+                </div>
+                <div className="playlist-list">
+                    {playlists.map(pl => (
+                        <div
+                            key={pl.id}
+                            className={`playlist-item ${selectedPlaylistId === pl.id ? "selected" : ""}`}
+                            onClick={() => selectPlaylist(pl.id)}
+                        >
+                            {editingId === pl.id ? (
+                                <input
+                                    type="text"
+                                    value={editName}
+                                    onChange={e => setEditName(e.target.value)}
+                                    onKeyDown={e => { if (e.key === "Enter") handleRename(pl.id); if (e.key === "Escape") setEditingId(null); }}
+                                    onBlur={() => handleRename(pl.id)}
+                                    autoFocus
+                                    className="playlist-rename-input"
+                                    onClick={e => e.stopPropagation()}
+                                />
+                            ) : (
+                                <>
+                                    <span className="playlist-item-name">{pl.name}</span>
+                                    <span className="playlist-item-count">{pl.track_count}</span>
+                                    <button className="playlist-item-edit" onClick={e => { e.stopPropagation(); setEditingId(pl.id); setEditName(pl.name); }} title="Rename">✏️</button>
+                                    <button className="playlist-item-delete" onClick={e => { e.stopPropagation(); handleDelete(pl.id); }} title="Delete">🗑</button>
+                                </>
+                            )}
+                        </div>
+                    ))}
+                    {playlists.length === 0 && (
+                        <div className="playlist-empty">No playlists yet</div>
+                    )}
+                </div>
+            </div>
+
+            <div className="playlist-content">
+                {selectedPlaylist ? (
+                    <>
+                        <div className="playlist-content-header">
+                            <h3>{selectedPlaylist.name}</h3>
+                            <span className="playlist-track-count">{playlistTracks.length} tracks</span>
+                            <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+                                <button className="playlist-queue-btn" onClick={() => handleLoadQueue(false)} title="Load in order">
+                                    ▶ Queue
+                                </button>
+                                <button className="playlist-queue-btn shuffle" onClick={() => handleLoadQueue(true)} title="Load shuffled">
+                                    🔀 Shuffle
+                                </button>
+                            </div>
+                        </div>
+                        {queueRemaining > 0 && (
+                            <div className="playlist-queue-status">
+                                AutoDJ queue: {queueRemaining} tracks remaining
+                            </div>
+                        )}
+                        <div className="playlist-tracks">
+                            <div className="playlist-tracks-header">
+                                <span className="pl-col-num">#</span>
+                                <span className="pl-col-title">Title</span>
+                                <span className="pl-col-artist">Artist</span>
+                                <span className="pl-col-bpm">BPM</span>
+                                <span className="pl-col-key">Key</span>
+                                <span className="pl-col-dur">Duration</span>
+                                <span className="pl-col-actions"></span>
+                            </div>
+                            {playlistTracks.map((track, idx) => (
+                                <div
+                                    key={track.id}
+                                    className={`playlist-track-row ${dragIdx === idx ? "dragging" : ""}`}
+                                    draggable
+                                    onDragStart={() => handleDragStart(idx)}
+                                    onDragOver={(e) => handleDragOver(e, idx)}
+                                    onDrop={() => handleDrop(idx)}
+                                >
+                                    <span className="pl-col-num">{idx + 1}</span>
+                                    <span className="pl-col-title">{track.title || "Unknown"}</span>
+                                    <span className="pl-col-artist">{track.artist || "Unknown"}</span>
+                                    <span className="pl-col-bpm">{track.bpm?.toFixed(1) ?? "—"}</span>
+                                    <span className="pl-col-key">{track.key || "—"}</span>
+                                    <span className="pl-col-dur">{track.duration_ms ? formatTime(track.duration_ms) : "—"}</span>
+                                    <span className="pl-col-actions">
+                                        <button className="deck-load-btn deck-a" onClick={() => loadTrack("a", track.id)}>A</button>
+                                        <button className="deck-load-btn deck-b" onClick={() => loadTrack("b", track.id)}>B</button>
+                                        <button className="playlist-remove-btn" onClick={() => removeTrackFromPlaylist(selectedPlaylistId!, track.id)} title="Remove">✕</button>
+                                    </span>
+                                </div>
+                            ))}
+                            {playlistTracks.length === 0 && (
+                                <div className="playlist-empty-content">
+                                    No tracks in this playlist. Right-click tracks in the Library to add them.
+                                </div>
+                            )}
+                        </div>
+                    </>
+                ) : (
+                    <div className="playlist-empty-content">
+                        {showExport ? (
+                            <div className="cue-sheet-panel">
+                                <h3>Export Cue Sheet</h3>
+                                <p style={{ color: "var(--text-secondary)", marginBottom: "12px" }}>Select a session to export its tracklist:</p>
+                                {sessions.length === 0 ? (
+                                    <p style={{ color: "var(--text-muted)" }}>No sessions recorded yet.</p>
+                                ) : (
+                                    <div className="session-list">
+                                        {sessions.map(s => {
+                                            const date = new Date(s.started_at * 1000);
+                                            return (
+                                                <button key={s.id} className="session-item" onClick={() => handleExport(s.id)}>
+                                                    <span>{date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                                                    <span className="session-info">{s.track_count ?? 0} tracks</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                                {cueSheet && (
+                                    <div className="cue-sheet-output">
+                                        <pre>{cueSheet}</pre>
+                                        <button className="playlist-queue-btn" onClick={() => navigator.clipboard.writeText(cueSheet)}>
+                                            📋 Copy to Clipboard
+                                        </button>
+                                    </div>
+                                )}
+                                <button className="filter-clear-btn" onClick={() => { setShowExport(false); setCueSheet(null); }} style={{ marginTop: "12px" }}>
+                                    ← Back
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="empty-state-icon">🎧</div>
+                                <div>Select a playlist or create a new one</div>
+                            </>
+                        )}
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
@@ -446,6 +694,60 @@ function drawWaveform(
     ctx.moveTo(playheadX, 0);
     ctx.lineTo(playheadX, height);
     ctx.stroke();
+}
+
+// ─── VU Meter ────────────────────────────────────────────────────
+
+function VuMeter({ rms, peak, accent }: { rms: number; peak: number; accent: string }) {
+    const toDb = (v: number) => (v > 0.0001 ? 20 * Math.log10(v) : -80);
+    const dbToPercent = (db: number) => Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
+
+    const rmsPercent = dbToPercent(toDb(rms));
+    const peakPercent = dbToPercent(toDb(peak));
+
+    // Color zones: green < -12dB, yellow -12 to -3dB, red > -3dB
+    const rmsDb = toDb(rms);
+    const barColor =
+        rmsDb > -3 ? "var(--status-error)" : rmsDb > -12 ? "var(--status-warning)" : accent;
+
+    return (
+        <div className="vu-meter">
+            <div className="vu-meter-track">
+                <div
+                    className="vu-meter-fill"
+                    style={{ height: `${rmsPercent}%`, background: barColor }}
+                />
+                {peak > 0.0001 && (
+                    <div
+                        className="vu-meter-peak"
+                        style={{ bottom: `${peakPercent}%`, background: accent }}
+                    />
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ─── Spectrum Analyzer ───────────────────────────────────────────
+
+const SPECTRUM_LABELS = ["32", "64", "125", "250", "500", "1K", "2K", "4K"];
+
+function SpectrumAnalyzer({ spectrum }: { spectrum: number[] }) {
+    return (
+        <div className="spectrum-analyzer">
+            {spectrum.slice(0, 8).map((val, i) => (
+                <div key={i} className="spectrum-col">
+                    <div className="spectrum-bar-track">
+                        <div
+                            className="spectrum-bar"
+                            style={{ height: `${Math.min(val * 100, 100)}%` }}
+                        />
+                    </div>
+                    <span className="spectrum-label">{SPECTRUM_LABELS[i]}</span>
+                </div>
+            ))}
+        </div>
+    );
 }
 
 // ─── Deck Panel ──────────────────────────────────────────────────
@@ -670,12 +972,19 @@ function DeckPanel({
             {isEmpty ? (
                 <div className="waveform-placeholder">No track loaded</div>
             ) : (
-                <canvas
-                    ref={canvasRef}
-                    className="waveform-canvas"
-                    onClick={handleSeek}
-                    style={{ cursor: "pointer" }}
-                />
+                <div className="waveform-meter-row">
+                    <canvas
+                        ref={canvasRef}
+                        className="waveform-canvas"
+                        onClick={handleSeek}
+                        style={{ cursor: "pointer" }}
+                    />
+                    <VuMeter
+                        rms={snapshot?.rms ?? 0}
+                        peak={snapshot?.peak ?? 0}
+                        accent={deckId === "A" ? "var(--accent-a)" : "var(--accent-b)"}
+                    />
+                </div>
             )}
 
             {!isEmpty && (
@@ -858,6 +1167,14 @@ function DeckPanel({
                                         <option value={0.16}>±16%</option>
                                     </select>
                                     <span className="tempo-display">{localBpm.toFixed(1)} BPM</span>
+                                    {trackProfile?.beats?.confidence != null && (
+                                        <span className={`bpm-confidence-badge ${
+                                            trackProfile.beats.confidence > 0.7 ? "bpm-conf-high" :
+                                            trackProfile.beats.confidence > 0.3 ? "bpm-conf-mid" : "bpm-conf-low"
+                                        }`}>
+                                            {trackProfile.beats.confidence > 0.7 ? "●" : trackProfile.beats.confidence > 0.3 ? "◐" : "○"}
+                                        </span>
+                                    )}
                                     {(() => {
                                         const track = tracks.find(t => t.id === snapshot?.track_id);
                                         if (track?.groove_type && track.groove_type !== "standard") {
@@ -1086,6 +1403,21 @@ function DJView() {
                 <DeckPanel deckId="B" className="deck-b-panel" masterBpm={masterBpm} />
             </div>
 
+            {/* ─── Metering Strip: Spectrum + Master Level ─── */}
+            <div className="metering-strip">
+                <VuMeter
+                    rms={engineState?.deck_a?.rms ?? 0}
+                    peak={engineState?.deck_a?.peak ?? 0}
+                    accent="var(--accent-a)"
+                />
+                <SpectrumAnalyzer spectrum={engineState?.spectrum ?? []} />
+                <VuMeter
+                    rms={engineState?.deck_b?.rms ?? 0}
+                    peak={engineState?.deck_b?.peak ?? 0}
+                    accent="var(--accent-b)"
+                />
+            </div>
+
             <div className="crossfader-container">
                 <div className="crossfader-labels">
                     <span>A</span>
@@ -1183,7 +1515,11 @@ function AiPanel() {
                     autodjPhaseRef.current = "planning";
                     setAutodjStatus("picking_first_track", "Selecting first track...");
 
-                    const pick = analyzedTracks[Math.floor(Math.random() * analyzedTracks.length)];
+                    // Use queue if available, otherwise random pick
+                    const queueFirst = state.advanceQueue();
+                    const pick = queueFirst
+                        ? analyzedTracks.find(t => t.id === queueFirst) || analyzedTracks[0]
+                        : analyzedTracks[Math.floor(Math.random() * analyzedTracks.length)];
                     await state.loadTrack("a", pick.id);
                     autodjPhaseRef.current = "monitoring";
                     setAutodjStatus("monitoring", `Playing: ${pick.title || "Unknown"}`);
@@ -1305,25 +1641,33 @@ function AiPanel() {
 
             if (shouldTrigger && !state.isThinking && !transitionLockRef.current) {
                 autodjPhaseRef.current = "planning";
-                setAutodjStatus("selecting_next", `AI selecting... (${triggerReason})`);
 
-                const decision = await state.requestNextTrack();
-
-                if (!decision || !decision.track_selection) {
-                    if (analyzedTracks.length > 1) {
-                        const currentTrackId = playingSnap.track_id;
-                        const others = analyzedTracks.filter(t => t.id !== currentTrackId);
-                        const pick = others[Math.floor(Math.random() * others.length)];
-                        pendingTrackRef.current = pick.id;
-                    } else if (analyzedTracks.length === 1) {
-                        pendingTrackRef.current = analyzedTracks[0].id;
-                    } else {
-                        autodjPhaseRef.current = "monitoring";
-                        setAutodjStatus("error", "No tracks to transition to");
-                        return;
-                    }
+                // Check if we have a playlist queue loaded
+                const queueTrackId = state.advanceQueue();
+                if (queueTrackId) {
+                    setAutodjStatus("selecting_next", `Queue: next track (${triggerReason})`);
+                    pendingTrackRef.current = queueTrackId;
                 } else {
-                    pendingTrackRef.current = decision.track_selection;
+                    setAutodjStatus("selecting_next", `AI selecting... (${triggerReason})`);
+
+                    const decision = await state.requestNextTrack();
+
+                    if (!decision || !decision.track_selection) {
+                        if (analyzedTracks.length > 1) {
+                            const currentTrackId = playingSnap.track_id;
+                            const others = analyzedTracks.filter(t => t.id !== currentTrackId);
+                            const pick = others[Math.floor(Math.random() * others.length)];
+                            pendingTrackRef.current = pick.id;
+                        } else if (analyzedTracks.length === 1) {
+                            pendingTrackRef.current = analyzedTracks[0].id;
+                        } else {
+                            autodjPhaseRef.current = "monitoring";
+                            setAutodjStatus("error", "No tracks to transition to");
+                            return;
+                        }
+                    } else {
+                        pendingTrackRef.current = decision.track_selection;
+                    }
                 }
 
                 // Load the next track onto the idle deck
@@ -1722,10 +2066,21 @@ function TransitionsPanel() {
 function SettingsPanel() {
     const { aiConfig, setAiConfig, audioDevices, getAudioDevices, savePreference, loadPreference } = useStore();
     const [apiKey, setApiKey] = useState("");
+    const [provider, setProvider] = useState<"gemini" | "groq">(aiConfig?.provider === "groq" ? "groq" : "gemini");
     const [isSaving, setIsSaving] = useState(false);
     const [defaultTemplate, setDefaultTemplate] = useState("smooth_beatmix");
     const [defaultDuration, setDefaultDuration] = useState(16);
     const [settingsTab, setSettingsTab] = useState<"ai" | "audio" | "autodj">("ai");
+
+    // Sync provider from config when it changes externally
+    useEffect(() => {
+        if (aiConfig?.provider) setProvider(aiConfig.provider === "groq" ? "groq" : "gemini");
+    }, [aiConfig?.provider]);
+
+    const providerDefaults = {
+        gemini: { model: "gemini-2.5-flash", endpoint: "https://generativelanguage.googleapis.com/v1beta/models", placeholder: "AIzaSy..." },
+        groq: { model: "llama-3.3-70b-versatile", endpoint: "https://api.groq.com/openai/v1", placeholder: "gsk_..." },
+    };
 
     // Load audio devices and saved preferences
     useEffect(() => {
@@ -1737,12 +2092,14 @@ function SettingsPanel() {
     const handleSaveAi = async () => {
         setIsSaving(true);
         try {
+            const defaults = providerDefaults[provider];
             await setAiConfig({
                 ...aiConfig,
                 enabled: true,
+                provider,
                 api_key: apiKey,
-                model: "gemini-1.5-pro",
-                endpoint_url: "https://generativelanguage.googleapis.com/v1beta/models"
+                model: defaults.model,
+                endpoint_url: defaults.endpoint,
             });
             setApiKey("");
         } catch (err) {
@@ -1804,8 +2161,34 @@ function SettingsPanel() {
             {settingsTab === "ai" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-                        <label style={labelStyle}>Gemini API Key</label>
-                        {aiConfig?.api_key && apiKey === "" ? (
+                        <label style={labelStyle}>AI Provider</label>
+                        <div style={{ display: "flex", gap: "4px", background: "rgba(0,0,0,0.2)", padding: "3px", borderRadius: "6px", border: "1px solid var(--border)" }}>
+                            {(["gemini", "groq"] as const).map(p => (
+                                <button
+                                    key={p}
+                                    onClick={() => { setProvider(p); setApiKey(""); }}
+                                    style={{
+                                        flex: 1,
+                                        padding: "8px",
+                                        border: "none",
+                                        borderRadius: "4px",
+                                        background: provider === p ? "var(--accent-a)" : "transparent",
+                                        color: provider === p ? "var(--bg-deepest)" : "var(--text-muted)",
+                                        fontWeight: 700,
+                                        fontSize: "12px",
+                                        cursor: "pointer",
+                                        textTransform: "uppercase" as const,
+                                        letterSpacing: "0.5px",
+                                    }}
+                                >
+                                    {p === "gemini" ? "Gemini" : "Groq"}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                        <label style={labelStyle}>{provider === "gemini" ? "Gemini" : "Groq"} API Key</label>
+                        {aiConfig?.api_key && aiConfig?.provider === provider && apiKey === "" ? (
                             <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border)" }}>
                                 <span style={{ fontFamily: "monospace", color: "var(--status-ready)", flex: 1, fontSize: "14px" }}>
                                     ✓ {aiConfig.api_key.substring(0, 4)}....{aiConfig.api_key.slice(-4)}
@@ -1817,12 +2200,18 @@ function SettingsPanel() {
                         ) : (
                             <input
                                 type="password"
-                                placeholder="AIzeSy..."
+                                placeholder={providerDefaults[provider].placeholder}
                                 value={apiKey}
                                 onChange={(e) => setApiKey(e.target.value)}
                                 style={inputStyle}
                             />
                         )}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)", padding: "6px 8px", background: "rgba(0,0,0,0.15)", borderRadius: "4px", lineHeight: 1.5 }}>
+                        {provider === "gemini"
+                            ? <>Model: <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>{providerDefaults.gemini.model}</span></>
+                            : <>Model: <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>{providerDefaults.groq.model}</span> &mdash; ultra-fast inference via Groq</>
+                        }
                     </div>
                     <button
                         onClick={handleSaveAi}
@@ -2008,6 +2397,12 @@ export default function App() {
                         Library
                     </button>
                     <button
+                        className={`nav-tab ${activeView === "playlists" ? "active" : ""}`}
+                        onClick={() => setActiveView("playlists")}
+                    >
+                        Playlists
+                    </button>
+                    <button
                         className={`nav-tab ${activeView === "dj" ? "active" : ""}`}
                         onClick={() => setActiveView("dj")}
                     >
@@ -2022,7 +2417,7 @@ export default function App() {
             </header>
 
             <main className="main-content">
-                {activeView === "library" ? <LibraryView /> : <DJView />}
+                {activeView === "library" ? <LibraryView /> : activeView === "playlists" ? <PlaylistView /> : <DJView />}
             </main>
 
             {isSettingsOpen && (

@@ -77,6 +77,23 @@ export interface AiDecision {
     confidence?: number;
 }
 
+export interface PlaylistRecord {
+    id: string;
+    name: string;
+    description: string | null;
+    created_at: number;
+    updated_at: number;
+    track_count: number;
+}
+
+export interface SessionRecord {
+    id: string;
+    started_at: number;
+    ended_at: number | null;
+    track_count: number | null;
+    total_duration_ms: number | null;
+}
+
 export type DjMode = "manual" | "assisted" | "autodj";
 
 export type AutodjStatus =
@@ -104,7 +121,7 @@ interface DJStore {
     tracks: TrackRecord[];
     engineState: EngineState | null;
     importing: boolean;
-    activeView: "dj" | "library";
+    activeView: "dj" | "library" | "playlists";
     mode: DjMode;
     aiDecision: AiDecision | null;
     isThinking: boolean;
@@ -147,7 +164,7 @@ interface DJStore {
     getAutoCues: (trackId: string) => Promise<Array<[string, number, number]>>;
     submitTransitionFeedback: (fromTrackId: string, toTrackId: string, templateUsed: string, rating: number, notes?: string) => Promise<void>;
     pollEngineState: () => Promise<void>;
-    setActiveView: (view: "dj" | "library") => void;
+    setActiveView: (view: "dj" | "library" | "playlists") => void;
     analyzeTrack: (trackId: string) => Promise<void>;
     classifyTrack: (trackId: string) => Promise<void>;
     getTrackProfile: (trackId: string) => Promise<any>;
@@ -178,6 +195,26 @@ interface DJStore {
     batchClassifyProgress: { done: number; total: number };
     classifyAll: () => Promise<void>;
     updateTrackClassification: (trackId: string, field: string, value: string) => Promise<void>;
+
+    // Playlists
+    playlists: PlaylistRecord[];
+    selectedPlaylistId: string | null;
+    playlistTracks: TrackRecord[];
+    autodjQueue: string[];  // ordered track IDs for AutoDJ playlist mode
+    autodjQueueIndex: number;
+    autodjShuffle: boolean;
+    fetchPlaylists: () => Promise<void>;
+    createPlaylist: (name: string, description?: string) => Promise<string | null>;
+    renamePlaylist: (playlistId: string, name: string) => Promise<void>;
+    deletePlaylist: (playlistId: string) => Promise<void>;
+    selectPlaylist: (playlistId: string | null) => Promise<void>;
+    addTrackToPlaylist: (playlistId: string, trackId: string) => Promise<void>;
+    removeTrackFromPlaylist: (playlistId: string, trackId: string) => Promise<void>;
+    reorderPlaylist: (playlistId: string, trackIds: string[]) => Promise<void>;
+    loadPlaylistToQueue: (playlistId: string, shuffle: boolean) => Promise<void>;
+    advanceQueue: () => string | null;
+    getSessions: () => Promise<SessionRecord[]>;
+    exportCueSheet: (sessionId: string) => Promise<string>;
 
     setErrorToast: (msg: string | null) => void;
     setEngineState: (state: EngineState) => void;
@@ -213,6 +250,13 @@ export const useStore = create<DJStore>((set, get) => ({
         sortBy: "created_at",
         sortOrder: "desc" as const,
     },
+
+    playlists: [],
+    selectedPlaylistId: null,
+    playlistTracks: [],
+    autodjQueue: [],
+    autodjQueueIndex: 0,
+    autodjShuffle: false,
 
     setErrorToast: (msg: string | null) => {
         set({ errorToast: msg });
@@ -668,4 +712,139 @@ export const useStore = create<DJStore>((set, get) => ({
     },
 
     setEngineState: (state: EngineState) => set({ engineState: state }),
+
+    // ─── Playlists ──────────────────────────────────────────────
+
+    fetchPlaylists: async () => {
+        try {
+            const playlists = await invoke<PlaylistRecord[]>("get_playlists");
+            set({ playlists });
+        } catch (e: any) {
+            get().setErrorToast(`Failed to fetch playlists: ${e}`);
+        }
+    },
+
+    createPlaylist: async (name: string, description?: string) => {
+        try {
+            const id = await invoke<string>("create_playlist", { name, description: description ?? null });
+            await get().fetchPlaylists();
+            return id;
+        } catch (e: any) {
+            get().setErrorToast(`Failed to create playlist: ${e}`);
+            return null;
+        }
+    },
+
+    renamePlaylist: async (playlistId: string, name: string) => {
+        try {
+            await invoke("rename_playlist", { playlistId, name });
+            await get().fetchPlaylists();
+        } catch (e: any) {
+            get().setErrorToast(`Failed to rename playlist: ${e}`);
+        }
+    },
+
+    deletePlaylist: async (playlistId: string) => {
+        try {
+            await invoke("delete_playlist", { playlistId });
+            if (get().selectedPlaylistId === playlistId) {
+                set({ selectedPlaylistId: null, playlistTracks: [] });
+            }
+            await get().fetchPlaylists();
+        } catch (e: any) {
+            get().setErrorToast(`Failed to delete playlist: ${e}`);
+        }
+    },
+
+    selectPlaylist: async (playlistId: string | null) => {
+        set({ selectedPlaylistId: playlistId });
+        if (playlistId) {
+            try {
+                const tracks = await invoke<TrackRecord[]>("get_playlist_tracks", { playlistId });
+                set({ playlistTracks: tracks });
+            } catch (e: any) {
+                get().setErrorToast(`Failed to load playlist: ${e}`);
+                set({ playlistTracks: [] });
+            }
+        } else {
+            set({ playlistTracks: [] });
+        }
+    },
+
+    addTrackToPlaylist: async (playlistId: string, trackId: string) => {
+        try {
+            await invoke("add_track_to_playlist", { playlistId, trackId });
+            await get().fetchPlaylists();
+            if (get().selectedPlaylistId === playlistId) {
+                await get().selectPlaylist(playlistId);
+            }
+        } catch (e: any) {
+            get().setErrorToast(`Failed to add track: ${e}`);
+        }
+    },
+
+    removeTrackFromPlaylist: async (playlistId: string, trackId: string) => {
+        try {
+            await invoke("remove_track_from_playlist", { playlistId, trackId });
+            await get().fetchPlaylists();
+            if (get().selectedPlaylistId === playlistId) {
+                await get().selectPlaylist(playlistId);
+            }
+        } catch (e: any) {
+            get().setErrorToast(`Failed to remove track: ${e}`);
+        }
+    },
+
+    reorderPlaylist: async (playlistId: string, trackIds: string[]) => {
+        try {
+            await invoke("reorder_playlist", { playlistId, trackIds });
+            if (get().selectedPlaylistId === playlistId) {
+                await get().selectPlaylist(playlistId);
+            }
+        } catch (e: any) {
+            get().setErrorToast(`Failed to reorder playlist: ${e}`);
+        }
+    },
+
+    loadPlaylistToQueue: async (playlistId: string, shuffle: boolean) => {
+        try {
+            const tracks = await invoke<TrackRecord[]>("get_playlist_tracks", { playlistId });
+            let ids = tracks.map(t => t.id);
+            if (shuffle) {
+                for (let i = ids.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [ids[i], ids[j]] = [ids[j], ids[i]];
+                }
+            }
+            set({ autodjQueue: ids, autodjQueueIndex: 0, autodjShuffle: shuffle });
+        } catch (e: any) {
+            get().setErrorToast(`Failed to load playlist queue: ${e}`);
+        }
+    },
+
+    advanceQueue: () => {
+        const { autodjQueue, autodjQueueIndex } = get();
+        if (autodjQueueIndex >= autodjQueue.length) return null;
+        const trackId = autodjQueue[autodjQueueIndex];
+        set({ autodjQueueIndex: autodjQueueIndex + 1 });
+        return trackId;
+    },
+
+    getSessions: async () => {
+        try {
+            return await invoke<SessionRecord[]>("get_sessions");
+        } catch (e: any) {
+            get().setErrorToast(`Failed to get sessions: ${e}`);
+            return [];
+        }
+    },
+
+    exportCueSheet: async (sessionId: string) => {
+        try {
+            return await invoke<string>("export_cue_sheet", { sessionId });
+        } catch (e: any) {
+            get().setErrorToast(`Failed to export cue sheet: ${e}`);
+            return "";
+        }
+    },
 }));
