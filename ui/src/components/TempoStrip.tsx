@@ -45,7 +45,10 @@ export function TempoStrip({
     return (
         <div className="tempo-strip">
             <div className="tempo-strip-header">
-                <span className="tempo-strip-label">TEMPO</span>
+                <div className="tempo-strip-labels">
+                    <span className="tempo-strip-label">TEMPO</span>
+                    <span className="tempo-strip-note">BPM nudge only</span>
+                </div>
                 <select
                     value={pitchRange}
                     onChange={(e) => setPitchRange(Number(e.target.value))}
@@ -66,7 +69,7 @@ export function TempoStrip({
                         setLocalBpm(next);
                         setDeckSpeed(deckId, next / originalBpm);
                     }}
-                    title="Nudge −2 BPM"
+                    title="Adjust tempo by -2 BPM"
                 >−</button>
 
                 <input
@@ -90,7 +93,7 @@ export function TempoStrip({
                         setLocalBpm(next);
                         setDeckSpeed(deckId, next / originalBpm);
                     }}
-                    title="Nudge +2 BPM"
+                    title="Adjust tempo by +2 BPM"
                 >+</button>
             </div>
 

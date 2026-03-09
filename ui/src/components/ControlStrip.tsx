@@ -120,9 +120,9 @@ export function ControlStrip({
 
                 <div className="control-divider" />
 
-                {/* FX: Beat Repeat */}
+                {/* Beat Repeat — real sample-accurate engine primitive */}
                 <div className="control-group">
-                    <span className="control-group-label">FX</span>
+                    <span className="control-group-label">ROLL</span>
                     <div className="control-group-btns">
                         {[0.5, 1, 2, 4].map((beats) => (
                             <button
@@ -147,10 +147,10 @@ export function ControlStrip({
                 </div>
             </div>
 
-            {/* ── Performance Row ── */}
+            {/* ── Performance Row: Vinyl Brake, Spinback, Slip (all real engine primitives) ── */}
             <div className="control-row perf-row">
                 <div className="control-group">
-                    <span className="control-group-label">PERF</span>
+                    <span className="control-group-label">REAL</span>
                     <div className="control-group-btns">
                         <button className="ctrl-btn ctrl-btn-sm perf-btn" onClick={() => vinylBrake(deckId, 1000)} disabled={isEmpty} title="Vinyl Brake">
                             <IconBrake size={12} />
@@ -167,6 +167,10 @@ export function ControlStrip({
                         </button>
                     </div>
                 </div>
+            </div>
+
+            <div className="control-truth-note">
+                Real primitives: beat repeat, vinyl brake, spinback, slip.
             </div>
         </div>
     );

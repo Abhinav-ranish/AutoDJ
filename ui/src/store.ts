@@ -82,6 +82,10 @@ export interface AiDecision {
     set_arc?: string;
     planner_mode?: string;
     template_scores?: [string, number][];
+    // Phase 50: why heuristic fallback was used instead of LLM
+    // Codes: missing_api_key | disabled | provider_error | timeout | parse_failure |
+    //        schema_validation_failure | unsafe_action_rejected | insufficient_confidence
+    fallback_reason?: string;
 }
 
 export interface PlaylistRecord {
@@ -138,11 +142,76 @@ export interface AiDebugInfo {
     bar_number: number;
     silence_frames: number;
     crossfader: number;
+    // Conductor runtime state (backend-owned)
+    conductor_phase?: string;
+    conductor_trigger?: string;
+    conductor_message?: string;
+    conductor_error?: string;
+    decision_source?: string;
+    fallback_reason?: string;
+    template_chosen?: string;
+    template_scores?: [string, number][];
+    entry_marker?: string;
+    confidence?: number;
+    reasoning_tags?: string[];
+    conductor_trigger_meta?: ConductorTriggerMeta;
+    conductor_decision_meta?: ConductorDecisionMeta;
+}
+
+export type ConductorTriggerKind =
+    | "initial_load"
+    | "transition_window"
+    | "position_fallback"
+    | "silence_recovery"
+    | "emergency_guard";
+
+export interface ConductorTriggerMeta {
+    kind: ConductorTriggerKind;
+    reason: string;
+    anchor: string | null;
+    window_start_ms: number | null;
+    observed_position_ms: number | null;
+    observed_position_fraction: number | null;
+}
+
+export interface ConductorDecisionMeta {
+    source: string;
+    fallback_reason: string | null;
+    selected_track_id: string | null;
+    transition_template: string | null;
+    template_is_simulated: boolean | null;
+    entry_marker: string | null;
+    execute_at_ms: number | null;
+    confidence: number | null;
+    template_scores: [string, number][] | null;
+    reasoning_tags: string[] | null;
+    action_timeline_available: boolean;
+}
+
+/// Backend conductor snapshot — the source of truth for AutoDJ state.
+export interface ConductorSnapshot {
+    phase: "idle" | "monitoring" | "planning" | "loading" | "aligning" | "transitioning";
+    message: string;
+    trigger_reason: string | null;
+    trigger_meta: ConductorTriggerMeta | null;
+    decision_source: string | null;
+    decision_meta: ConductorDecisionMeta | null;
+    fallback_reason: string | null;
+    template_chosen: string | null;
+    entry_marker: string | null;
+    pending_track_id: string | null;
+    pending_track_title: string | null;
+    confidence: number | null;
+    template_scores: [string, number][] | null;
+    reasoning_tags: string[] | null;
+    active: boolean;
+    error: string | null;
 }
 
 interface DJStore {
     tracks: TrackRecord[];
     engineState: EngineState | null;
+    conductorState: ConductorSnapshot | null;
     importing: boolean;
     activeView: "dj" | "library" | "playlists";
     mode: DjMode;
@@ -260,11 +329,14 @@ interface DJStore {
 
     setErrorToast: (msg: string | null) => void;
     setEngineState: (state: EngineState) => void;
+    setConductorState: (state: ConductorSnapshot) => void;
+    setConductorQueue: (trackIds: string[]) => Promise<void>;
 }
 
 export const useStore = create<DJStore>((set, get) => ({
     tracks: [],
     engineState: null,
+    conductorState: null,
     importing: false,
     activeView: "library",
     mode: "manual",
@@ -757,6 +829,12 @@ export const useStore = create<DJStore>((set, get) => ({
 
     setEngineState: (state: EngineState) => set({ engineState: state }),
 
+    setConductorState: (state: ConductorSnapshot) => set({ conductorState: state }),
+
+    setConductorQueue: async (trackIds: string[]) => {
+        await invoke("set_conductor_queue", { trackIds });
+    },
+
     // ─── Playlists ──────────────────────────────────────────────
 
     fetchPlaylists: async () => {
@@ -861,6 +939,8 @@ export const useStore = create<DJStore>((set, get) => ({
                 }
             }
             set({ autodjQueue: ids, autodjQueueIndex: 0, autodjShuffle: shuffle });
+            // Push queue to backend conductor
+            await invoke("set_conductor_queue", { trackIds: ids });
         } catch (e: any) {
             get().setErrorToast(`Failed to load playlist queue: ${e}`);
         }

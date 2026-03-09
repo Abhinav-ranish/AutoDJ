@@ -3463,3 +3463,1218 @@ body {
 .dj-view::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+
+/* ================================================================
+   Phase 50: Conductor Rail — Live DJ Performance Status Rail
+   ================================================================ */
+
+.conductor-rail {
+  display: flex;
+  align-items: stretch;
+  background: linear-gradient(180deg, #0e0e1c 0%, #09090f 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  min-height: 64px;
+  box-shadow:
+    0 2px 20px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+/* Mode selector — leftmost */
+.conductor-mode {
+  display: flex;
+  align-items: center;
+  padding: var(--gap-sm) var(--gap-md);
+  border-right: 1px solid var(--border);
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* NOW section */
+.conductor-now {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: var(--gap-sm) var(--gap-md);
+  flex: 1.3;
+  min-width: 160px;
+  border-right: 1px solid var(--border-subtle);
+  transition: background 0.4s ease;
+}
+
+.conductor-now.deck-a-active {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.05) 0%, transparent 70%);
+}
+
+.conductor-now.deck-b-active {
+  background: linear-gradient(135deg, rgba(255, 149, 0, 0.05) 0%, transparent 70%);
+}
+
+/* NEXT section */
+.conductor-next {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: var(--gap-sm) var(--gap-md);
+  flex: 1;
+  min-width: 140px;
+  border-right: 1px solid var(--border-subtle);
+}
+
+/* Shared section label */
+.conductor-section-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--accent-a);
+  opacity: 0.65;
+  line-height: 1;
+}
+
+.conductor-section-label-b {
+  color: var(--accent-b);
+}
+
+/* Track primary row — pip + name */
+.conductor-track-primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Deck color pip */
+.conductor-deck-pip {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.conductor-deck-pip-a {
+  background: var(--accent-a);
+  box-shadow: 0 0 6px var(--accent-a);
+}
+
+.conductor-deck-pip-b {
+  background: var(--accent-b);
+  box-shadow: 0 0 6px var(--accent-b);
+}
+
+/* Track name — primary identity */
+.conductor-track-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  letter-spacing: -0.1px;
+}
+
+.conductor-track-name-next {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Sub-row — artist + bpm */
+.conductor-track-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+
+.conductor-track-artist {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.conductor-bpm {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-a);
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.conductor-bpm-b {
+  color: var(--accent-b);
+}
+
+.conductor-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Bridge / transition arrow */
+.conductor-bridge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--gap-xs) var(--gap-sm);
+  flex-shrink: 0;
+  min-width: 72px;
+  border-right: 1px solid var(--border-subtle);
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conductor-bridge-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conductor-arrow-glyph {
+  font-size: 18px;
+  color: var(--text-muted);
+  line-height: 1;
+  transition: color 0.3s ease;
+}
+
+.conductor-bridge-inner.active .conductor-arrow-glyph {
+  color: var(--status-ready);
+  text-shadow: 0 0 10px var(--status-ready);
+  animation: pulse 1s infinite ease-in-out;
+}
+
+.conductor-template-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: rgba(0, 230, 118, 0.1);
+  border: 1px solid rgba(0, 230, 118, 0.25);
+  color: var(--status-ready);
+  text-transform: capitalize;
+  letter-spacing: 0.3px;
+  text-align: center;
+  max-width: 68px;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Load to B button */
+.conductor-queue-btn {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--accent-b-dim);
+  background: var(--accent-b-glow);
+  color: var(--accent-b);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.conductor-queue-btn:hover {
+  background: var(--accent-b);
+  color: var(--bg-deepest);
+}
+
+/* Spectrum — decorative secondary */
+.conductor-spectrum {
+  flex-shrink: 0;
+  width: 100px;
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: stretch;
+  padding: 6px 4px;
+}
+
+.conductor-spectrum .spectrum-analyzer {
+  height: 100%;
+  max-width: none;
+  width: 100%;
+}
+
+/* Action area — rightmost */
+.conductor-action {
+  display: flex;
+  align-items: center;
+  padding: var(--gap-sm) var(--gap-md);
+  flex-shrink: 0;
+  min-width: 170px;
+}
+
+/* AutoDJ status */
+.conductor-autodj-status {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  width: 100%;
+}
+
+.conductor-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.conductor-dot-active {
+  background: var(--status-ready);
+  box-shadow: 0 0 10px var(--status-ready);
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+.conductor-dot-transitioning {
+  background: var(--accent-a);
+  box-shadow: 0 0 10px var(--accent-a);
+  animation: pulse-transition 0.8s infinite ease-in-out;
+}
+
+.conductor-dot-error {
+  background: var(--status-error);
+  box-shadow: 0 0 8px var(--status-error);
+}
+
+.conductor-status-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.conductor-status-mode {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--status-ready);
+  opacity: 0.75;
+  line-height: 1;
+}
+
+.conductor-status-message {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conductor-confidence {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--status-ready);
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* Manual/Assisted action */
+.conductor-manual-action {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  align-items: flex-start;
+  width: 100%;
+}
+
+.conductor-find-btn {
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-a-dim);
+  background: var(--accent-a-glow);
+  color: var(--accent-a);
+  cursor: pointer;
+  transition: all 0.2s ease, transform 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.conductor-find-btn:hover:not(:disabled) {
+  background: var(--accent-a);
+  color: var(--bg-deepest);
+  box-shadow: 0 0 14px var(--accent-a-glow);
+  transform: translateY(-1px);
+}
+
+.conductor-find-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.conductor-find-btn.thinking {
+  cursor: wait;
+  opacity: 0.6;
+  animation: think-pulse 1.2s infinite ease-in-out;
+}
+
+.conductor-find-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.conductor-planner-chip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  color: var(--accent-a);
+  text-transform: capitalize;
+}
+
+/* Conductor rail responsive */
+@media (max-width: 1200px) {
+  .conductor-spectrum {
+    display: none;
+  }
+
+  .conductor-bridge {
+    min-width: 48px;
+    padding: var(--gap-xs);
+  }
+}
+
+@media (max-width: 960px) {
+  .conductor-rail {
+    flex-wrap: wrap;
+  }
+
+  .conductor-next {
+    display: none;
+  }
+
+  .conductor-bridge {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .conductor-mode {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .conductor-action {
+    min-width: unset;
+    flex: 1;
+  }
+}
+
+/* ================================================================
+   Phase 50: Active Deck — Stronger Playing State
+   ================================================================ */
+
+/* Idle decks are quieter */
+.deck-a-panel {
+  border-top-color: var(--accent-a-dim);
+}
+
+.deck-b-panel {
+  border-top-color: var(--accent-b-dim);
+}
+
+/* Playing deck — much more dominant */
+.deck-a-panel:has(.deck-state-badge.playing) {
+  border-top-color: var(--accent-a) !important;
+  border-top-width: 3px;
+  border-color: rgba(0, 212, 255, 0.3);
+  box-shadow:
+    0 0 0 1px rgba(0, 212, 255, 0.15),
+    0 4px 32px rgba(0, 0, 0, 0.5),
+    0 0 50px rgba(0, 212, 255, 0.1);
+}
+
+.deck-b-panel:has(.deck-state-badge.playing) {
+  border-top-color: var(--accent-b) !important;
+  border-top-width: 3px;
+  border-color: rgba(255, 149, 0, 0.3);
+  box-shadow:
+    0 0 0 1px rgba(255, 149, 0, 0.15),
+    0 4px 32px rgba(0, 0, 0, 0.5),
+    0 0 50px rgba(255, 149, 0, 0.1);
+}
+
+/* Waveform also brightens on the playing deck */
+.deck-a-panel:has(.deck-state-badge.playing) .waveform-canvas {
+  border-color: rgba(0, 212, 255, 0.25);
+  box-shadow: inset 0 0 16px rgba(0, 212, 255, 0.07);
+}
+
+.deck-b-panel:has(.deck-state-badge.playing) .waveform-canvas {
+  border-color: rgba(255, 149, 0, 0.25);
+  box-shadow: inset 0 0 16px rgba(255, 149, 0, 0.07);
+}
+
+/* ================================================================
+   Phase 50: Waveform — Taller, More Dominant
+   ================================================================ */
+
+.waveform-container {
+  height: 148px;
+}
+
+.waveform-canvas {
+  height: 148px;
+}
+
+.waveform-empty {
+  height: 148px;
+}
+
+/* ================================================================
+   Phase 50: Track Title — Stronger Presence
+   ================================================================ */
+
+.deck-track-title {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.deck-track-artist {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Meta tags — quieter, less boxed */
+.meta-tag {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+}
+
+.meta-tag-genre {
+  color: rgba(0, 212, 255, 0.6);
+  border-color: rgba(0, 212, 255, 0.15);
+}
+
+.meta-tag-groove {
+  color: rgba(255, 149, 0, 0.6);
+  border-color: rgba(255, 149, 0, 0.15);
+}
+
+/* ================================================================
+   Phase 50: Center Mixer — Spine Identity & Authority
+   ================================================================ */
+
+.center-mixer {
+  background: linear-gradient(180deg, #0c0c18 0%, #080810 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  position: relative;
+}
+
+/* Mixer spine header — identity label */
+.mixer-spine-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px var(--gap-xs) 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.mixer-spine-label {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+/* Larger, more tactile crossfader */
+.center-mixer-xfader .crossfader-slider {
+  height: 8px;
+  background: linear-gradient(90deg,
+    var(--accent-a-dim) 0%,
+    var(--bg-hover) 40%,
+    var(--bg-hover) 60%,
+    var(--accent-b-dim) 100%
+  );
+}
+
+.center-mixer-xfader .crossfader-slider::-webkit-slider-thumb {
+  width: 30px;
+  height: 30px;
+  border: 3px solid var(--bg-deep);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+}
+
+/* Crossfader section gets more vertical breathing room */
+.center-mixer-xfader {
+  padding: var(--gap-sm) var(--gap-sm);
+}
+
+/* EQ/Gain sliders in mixer — slightly taller on large screens */
+.center-mixer-section .gain-slider,
+.center-mixer-section .filter-slider,
+.center-mixer-section .eq-slider {
+  height: 68px;
+}
+
+.center-mixer-section .eq-knob .eq-slider {
+  height: 54px;
+}
+
+/* Deck A/B labels in mixer — larger, more prominent */
+.center-mixer-label {
+  font-size: 13px;
+  letter-spacing: 3px;
+}
+
+/* ================================================================
+   Phase 50: Control Strip — Reduced Label Noise
+   ================================================================ */
+
+/* Control group labels — even quieter */
+.control-group-label {
+  font-size: 8px;
+  color: var(--text-muted);
+  opacity: 0.5;
+  min-width: 22px;
+  letter-spacing: 0.5px;
+}
+
+/* Play button — more physical when active */
+.play-btn.active {
+  border-color: var(--status-active);
+  box-shadow:
+    0 0 20px var(--accent-a-glow),
+    inset 0 0 10px rgba(0, 212, 255, 0.12);
+  background: rgba(0, 212, 255, 0.1);
+}
+
+.deck-b-panel .play-btn.active {
+  border-color: var(--accent-b);
+  box-shadow:
+    0 0 20px var(--accent-b-glow),
+    inset 0 0 10px rgba(255, 149, 0, 0.12);
+  background: rgba(255, 149, 0, 0.1);
+}
+
+/* ================================================================
+   Phase 50: DJ View — Tighter Performance Layout
+   ================================================================ */
+
+/* Reduce gap to give decks more vertical space */
+.dj-view {
+  padding: var(--gap-sm) var(--gap-md);
+  gap: var(--gap-sm);
+}
+
+/* Deck panels: slightly denser gap between sections */
+.deck {
+  gap: 6px;
+}
+
+/* BPM readout — when playing deck, brighter */
+.deck-a-panel:has(.deck-state-badge.playing) .deck-bpm-readout {
+  text-shadow: 0 0 24px rgba(0, 212, 255, 0.4);
+}
+
+.deck-b-panel:has(.deck-state-badge.playing) .deck-bpm-readout {
+  text-shadow: 0 0 24px rgba(255, 149, 0, 0.4);
+}
+
+/* Progress bar — slightly taller for better interaction area */
+.deck-progress-bar {
+  height: 5px;
+}
+
+.deck-progress-bar:hover {
+  height: 8px;
+}
+
+/* Time display — slightly bolder remaining time */
+.deck-time-remaining {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.deck-time-elapsed {
+  color: var(--text-muted);
+}
+
+/* Tempo strip — subtler background on idle, minimal*/
+.tempo-strip {
+  background: transparent;
+  border-top-color: var(--border-subtle);
+}
+
+/* ================================================================
+   Phase 50: Deck State Badge — Playing Pulse (more visible)
+   ================================================================ */
+
+.deck-state-badge.playing {
+  background: rgba(0, 230, 118, 0.15);
+  color: var(--status-ready);
+  border-color: rgba(0, 230, 118, 0.35);
+  animation: badge-pulse 2s infinite ease-in-out;
+}
+
+/* ================================================================
+   Phase 50: Responsive Conductor Rail Overrides
+   ================================================================ */
+
+/* Already handled above in conductor-rail responsive section */
+
+/* Override old .ai-bar responsive rules that may interfere */
+@media (max-width: 1200px) {
+  .decks-container {
+    grid-template-columns: 1fr 180px 1fr;
+  }
+}
+
+@media (max-width: 960px) {
+  .decks-container {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+  }
+
+  .center-mixer {
+    grid-column: 1 / -1;
+  }
+}
+/* ================================================================
+   Phase 50: Fallback Reason Chip
+   ================================================================ */
+
+.conductor-fallback-chip {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: inline-block;
+  margin-top: 1px;
+}
+
+.conductor-fallback-chip.expected {
+  background: rgba(85, 85, 112, 0.25);
+  border: 1px solid rgba(85, 85, 112, 0.35);
+  color: var(--text-muted);
+}
+
+.conductor-fallback-chip.warn {
+  background: rgba(255, 193, 7, 0.08);
+  border: 1px solid rgba(255, 193, 7, 0.22);
+  color: var(--status-pending);
+}
+
+/* ================================================================
+   Reality Audit: Honest UI — New Conductor Elements
+   ================================================================ */
+
+/* Section header row: NOW label + active deck indicator */
+.conductor-section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+/* Active deck badge in conductor rail */
+.conductor-active-deck {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  text-transform: uppercase;
+}
+
+.conductor-active-deck-a {
+  color: var(--accent-a);
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.25);
+}
+
+.conductor-active-deck-b {
+  color: var(--accent-b);
+  background: rgba(255, 149, 0, 0.1);
+  border: 1px solid rgba(255, 149, 0, 0.25);
+}
+
+/* Bridge detail layout: template + trigger stacked */
+.conductor-bridge-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Trigger chip — shows why transition fires */
+.conductor-trigger-chip {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 2px;
+  text-transform: capitalize;
+  letter-spacing: 0.3px;
+  text-align: center;
+  max-width: 80px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Marker-aware trigger — the strongest real feature */
+.conductor-trigger-marker {
+  background: rgba(0, 212, 255, 0.12);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  color: var(--accent-a);
+}
+
+/* Entry/exit marker chips */
+.conductor-marker-row {
+  display: flex;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.conductor-marker-chip {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.conductor-marker-chip.exit {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.conductor-marker-chip.entry {
+  color: var(--accent-b);
+  background: rgba(255, 149, 0, 0.08);
+  border: 1px solid rgba(255, 149, 0, 0.2);
+}
+
+/* Decision source chip — shows heuristic vs LLM */
+.conductor-source-chip {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.conductor-source-heuristic {
+  color: var(--text-secondary);
+  background: rgba(136, 136, 170, 0.12);
+  border: 1px solid rgba(136, 136, 170, 0.2);
+}
+
+.conductor-source-llm {
+  color: #b266ff;
+  background: rgba(178, 102, 255, 0.1);
+  border: 1px solid rgba(178, 102, 255, 0.25);
+}
+
+.conductor-source-queue {
+  color: var(--accent-b);
+  background: rgba(255, 149, 0, 0.08);
+  border: 1px solid rgba(255, 149, 0, 0.2);
+}
+
+/* Status top row: mode label + source chip inline */
+.conductor-status-top {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+
+/* Key display in conductor next section */
+.conductor-key {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Transition template description text */
+.transition-desc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+/* ================================================================
+   Reality Audit: Stronger Active Deck Differentiation
+   ================================================================ */
+
+/* Idle/empty deck — much dimmer */
+.deck:not(:has(.deck-state-badge.playing)) {
+  opacity: 0.7;
+  transition: opacity 0.4s ease;
+}
+
+.deck:not(:has(.deck-state-badge.playing)):hover {
+  opacity: 0.9;
+}
+
+/* Playing deck — full presence */
+.deck:has(.deck-state-badge.playing) {
+  opacity: 1;
+}
+
+/* LIVE badge — larger, more assertive */
+.deck-state-badge.playing {
+  font-size: 10px;
+  padding: 3px 10px;
+  gap: 5px;
+  background: rgba(0, 230, 118, 0.18);
+  border-color: rgba(0, 230, 118, 0.4);
+  box-shadow: 0 0 10px rgba(0, 230, 118, 0.15);
+}
+
+/* Deck label — stronger on active deck */
+.deck:has(.deck-state-badge.playing) .deck-label {
+  text-shadow: 0 0 16px currentColor;
+}
+
+/* ================================================================
+   Reality Audit: Marker-Aware Mixing Visualization
+   ================================================================ */
+
+/* Mix point marker on progress bar */
+.deck-progress-bar {
+  position: relative;
+}
+
+.deck-mix-point {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  background: var(--status-ready);
+  opacity: 0.5;
+  z-index: 1;
+  border-radius: 1px;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.deck-progress-bar:hover .deck-mix-point {
+  opacity: 0.8;
+}
+
+/* Mix point count label */
+.deck-mix-point-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--status-ready);
+  opacity: 0.6;
+  letter-spacing: 0.3px;
+}
+
+/* ================================================================
+   Frontend Pass: Reality-First Performance Surface Overrides
+   ================================================================ */
+
+.decks-container {
+  grid-template-columns: minmax(0, 1fr) 250px minmax(0, 1fr);
+}
+
+.deck-role-chip {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.deck-role-chip.active {
+  border-color: rgba(0, 230, 118, 0.35);
+  color: var(--status-ready);
+  background: rgba(0, 230, 118, 0.12);
+}
+
+.deck-role-chip.standby {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.deck.deck-standby {
+  opacity: 0.74;
+}
+
+.deck.deck-active {
+  opacity: 1;
+}
+
+.deck.deck-empty {
+  opacity: 0.62;
+}
+
+.deck-window-status {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-top: 2px;
+}
+
+.deck-window-status.live {
+  color: var(--status-ready);
+  text-shadow: 0 0 8px rgba(0, 230, 118, 0.25);
+}
+
+.deck-window-status.queued {
+  color: var(--accent-a);
+}
+
+.tempo-strip-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tempo-strip-note {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.control-truth-note {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-muted);
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 0.45px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 5px;
+  margin-top: 2px;
+}
+
+.center-mixer {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.center-mixer-active-a {
+  box-shadow:
+    0 0 0 1px rgba(0, 212, 255, 0.1),
+    0 4px 24px rgba(0, 0, 0, 0.55);
+}
+
+.center-mixer-active-b {
+  box-shadow:
+    0 0 0 1px rgba(255, 149, 0, 0.1),
+    0 4px 24px rgba(0, 0, 0, 0.55);
+}
+
+.center-mixer-master-readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.center-mixer-master-chip {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  border-radius: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.center-mixer-master-chip.master-a {
+  color: var(--accent-a);
+  border-color: rgba(0, 212, 255, 0.26);
+  background: rgba(0, 212, 255, 0.08);
+}
+
+.center-mixer-master-chip.master-b {
+  color: var(--accent-b);
+  border-color: rgba(255, 149, 0, 0.26);
+  background: rgba(255, 149, 0, 0.08);
+}
+
+.center-mixer-master-value {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-secondary);
+  letter-spacing: 0.4px;
+}
+
+.conductor-rail {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.conductor-now {
+  flex: 1.45;
+}
+
+.conductor-next {
+  flex: 1.1;
+}
+
+.conductor-bridge {
+  min-width: 130px;
+}
+
+.conductor-action {
+  min-width: 230px;
+}
+
+.conductor-live-chip {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 4px;
+  color: var(--status-ready);
+  border: 1px solid rgba(0, 230, 118, 0.28);
+  background: rgba(0, 230, 118, 0.1);
+}
+
+.conductor-template-sim-chip {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  border-radius: 2px;
+  padding: 1px 4px;
+  color: var(--status-pending);
+  border: 1px solid rgba(255, 193, 7, 0.32);
+  background: rgba(255, 193, 7, 0.08);
+}
+
+.conductor-trigger-fallback {
+  color: var(--text-secondary);
+  background: rgba(136, 136, 170, 0.12);
+  border: 1px solid rgba(136, 136, 170, 0.24);
+}
+
+.conductor-bridge-intent {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.conductor-next-intent {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.transition-sim-chip {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  background: rgba(255, 193, 7, 0.1);
+  color: var(--status-pending);
+}
+
+@media (max-width: 1200px) {
+  .decks-container {
+    grid-template-columns: minmax(0, 1fr) 210px minmax(0, 1fr);
+  }
+
+  .conductor-bridge {
+    min-width: 100px;
+  }
+
+  .conductor-action {
+    min-width: 190px;
+  }
+}
+
+@media (max-width: 960px) {
+  .center-mixer-master-readout {
+    order: -1;
+  }
+
+  .conductor-bridge-intent {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .deck.deck-standby {
+    opacity: 0.88;
+  }
+
+  .control-truth-note {
+    font-size: 7px;
+  }
+}

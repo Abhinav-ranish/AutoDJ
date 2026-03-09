@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useStore } from "../store";
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -19,11 +19,19 @@ export function DeckPanel({
     masterBpm: number;
 }) {
     const store = useStore();
-    const { engineState, play, pause, tracks, mode, getTrackProfile } = store;
+    const { engineState, tracks, mode, getTrackProfile } = store;
 
     const snapshot = deckId === "A" ? engineState?.deck_a : engineState?.deck_b;
     const isPlaying = snapshot?.state === "playing";
     const isEmpty = !snapshot || snapshot.state === "empty";
+    const deckKey = deckId.toLowerCase() as "a" | "b";
+
+    const aPlaying = engineState?.deck_a?.state === "playing";
+    const bPlaying = engineState?.deck_b?.state === "playing";
+    let activeDeckKey: "a" | "b" = engineState && engineState.crossfader > 0 ? "b" : "a";
+    if (aPlaying && !bPlaying) activeDeckKey = "a";
+    if (!aPlaying && bPlaying) activeDeckKey = "b";
+    const isActiveDeck = !isEmpty && activeDeckKey === deckKey;
 
     // ── Album Art + Hot Cues ──
     const [albumArtUrl, setAlbumArtUrl] = useState<string | null>(null);
@@ -75,14 +83,36 @@ export function DeckPanel({
     const trackGroove = matchedTrack?.groove_type;
     const trackBpm = matchedTrack?.bpm;
     const displayBpm = trackBpm?.toFixed(1) || masterBpm.toFixed(1);
-    const accentVar = deckId === "A" ? "var(--accent-a)" : "var(--accent-b)";
+
+    // ── Transition windows (marker-aware mixing) ──
+    // This is the strongest real feature per reality_audit.md #10.
+    // Show mix point markers on the progress bar when available.
+    const transitionWindowsRaw = (trackProfile?.transition_windows ?? []) as Array<{
+        anchor: string; start_ms: number; end_ms: number; score: number;
+    }>;
+    const transitionWindows = [...transitionWindowsRaw].sort((a, b) => a.start_ms - b.start_ms);
+    const durationMs = snapshot?.duration_ms ?? 0;
+    const positionMs = snapshot?.position_ms ?? 0;
+    const activeWindow = transitionWindows.find((w) => positionMs >= w.start_ms && positionMs <= w.end_ms) || null;
+    const nextWindow = transitionWindows.find((w) => w.start_ms > positionMs) || null;
+
+    const windowStatus = activeWindow
+        ? `MIX WINDOW LIVE · ${activeWindow.anchor.replace(/_/g, " ")}`
+        : nextWindow
+            ? `NEXT WINDOW ${nextWindow.anchor.replace(/_/g, " ")} IN ${formatTime(nextWindow.start_ms - positionMs)}`
+            : null;
 
     return (
-        <div className={`deck ${className}`}>
+        <div className={`deck ${className} ${isActiveDeck ? "deck-active" : "deck-standby"} ${isEmpty ? "deck-empty" : ""}`}>
             {/* ── Deck Header ── */}
             <div className="deck-header">
                 <div className="deck-header-left">
                     <span className="deck-label">DECK {deckId}</span>
+                    {!isEmpty && (
+                        <span className={`deck-role-chip ${isActiveDeck ? "active" : "standby"}`}>
+                            {isActiveDeck ? "ON AIR" : "STANDBY"}
+                        </span>
+                    )}
                     {!isEmpty && (
                         <span className={`deck-state-badge ${isPlaying ? "playing" : "paused"}`}>
                             {isPlaying ? <IconPlay size={10} /> : <IconPause size={10} />}
@@ -98,9 +128,21 @@ export function DeckPanel({
             {/* ── Track Info ── */}
             <div className="deck-track-info">
                 <div className="deck-track-info-left">
-                    {albumArtUrl && (
-                        <img src={albumArtUrl} alt="" className="deck-album-art" />
-                    )}
+                    {albumArtUrl ? (
+                        <img
+                            src={albumArtUrl}
+                            alt=""
+                            className="deck-album-art"
+                            onError={() => setAlbumArtUrl(null)}
+                        />
+                    ) : !isEmpty ? (
+                        <div className="deck-album-art deck-album-art-placeholder">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <circle cx="12" cy="12" r="10" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                        </div>
+                    ) : null}
                     <div className="deck-track-text">
                         <span className="deck-track-title">{trackTitle}</span>
                         {trackArtist && <span className="deck-track-artist">{trackArtist}</span>}
@@ -135,11 +177,30 @@ export function DeckPanel({
                         store.seek(deckId, fraction * snapshot.duration_ms);
                     }}>
                         <div className="deck-progress-fill" style={{ width: `${(snapshot?.position_fraction ?? 0) * 100}%` }} />
+                        {/* Mix point markers — marker-aware mixing visualization */}
+                        {durationMs > 0 && transitionWindows.map((w, i) => (
+                            <div
+                                key={i}
+                                className="deck-mix-point"
+                                style={{ left: `${(w.start_ms / durationMs) * 100}%` }}
+                                title={`Mix point: ${w.anchor.replace(/_/g, " ")} (score: ${w.score.toFixed(2)})`}
+                            />
+                        ))}
                     </div>
                     <div className="deck-time-row">
                         <span className="deck-time-elapsed">{formatTime(snapshot?.position_ms ?? 0)}</span>
+                        {transitionWindows.length > 0 && (
+                            <span className="deck-mix-point-label" title="Marker-aware mix points detected">
+                                {transitionWindows.length} mix {transitionWindows.length === 1 ? "point" : "points"}
+                            </span>
+                        )}
                         <span className="deck-time-remaining">-{formatTime((snapshot?.duration_ms ?? 0) - (snapshot?.position_ms ?? 0))}</span>
                     </div>
+                    {windowStatus && (
+                        <div className={`deck-window-status ${activeWindow ? "live" : "queued"}`}>
+                            {windowStatus}
+                        </div>
+                    )}
                 </div>
             )}
 

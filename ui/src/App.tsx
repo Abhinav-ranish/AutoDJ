@@ -567,6 +567,12 @@ function DJView() {
     const masterBpm = engineState?.master_bpm ?? 128;
     const snapA = engineState?.deck_a;
     const snapB = engineState?.deck_b;
+    const aPlaying = snapA?.state === "playing";
+    const bPlaying = snapB?.state === "playing";
+    let activeDeck: "A" | "B" = (engineState?.crossfader ?? 0) > 0 ? "B" : "A";
+    if (aPlaying && !bPlaying) activeDeck = "A";
+    if (!aPlaying && bPlaying) activeDeck = "B";
+    const crossfaderPercent = Math.round((engineState?.crossfader ?? 0) * 100);
 
     const [recordingElapsed, setRecordingElapsed] = useState(0);
     useEffect(() => {
@@ -587,25 +593,34 @@ function DJView() {
             <div className="decks-container">
                 <DeckPanel deckId="A" className="deck-a-panel" masterBpm={masterBpm} />
 
-                <div className="center-mixer">
-                    {mode !== "autodj" && (
-                        <div className="center-mixer-eqs">
-                            {snapA && snapA.state !== "empty" && (
-                                <div className="center-mixer-section center-mixer-a">
-                                    <span className="center-mixer-label">A</span>
-                                    <MixerControls deckId="A" snapshot={snapA} mode={mode} />
-                                </div>
-                            )}
-                            {snapB && snapB.state !== "empty" && (
-                                <div className="center-mixer-section center-mixer-b">
-                                    <span className="center-mixer-label">B</span>
-                                    <MixerControls deckId="B" snapshot={snapB} mode={mode} />
-                                </div>
-                            )}
-                        </div>
-                    )}
+                <div className={`center-mixer center-mixer-active-${activeDeck.toLowerCase()}`}>
+                    <div className="mixer-spine-header">
+                        <span className="mixer-spine-label">MIXER</span>
+                    </div>
+                    <div className={`center-mixer-eqs ${mode === "autodj" ? "center-mixer-eqs-readonly" : ""}`}>
+                        {snapA && snapA.state !== "empty" && (
+                            <div className="center-mixer-section center-mixer-a">
+                                <span className="center-mixer-label">A</span>
+                                <MixerControls deckId="A" snapshot={snapA} mode={mode} />
+                            </div>
+                        )}
+                        {snapB && snapB.state !== "empty" && (
+                            <div className="center-mixer-section center-mixer-b">
+                                <span className="center-mixer-label">B</span>
+                                <MixerControls deckId="B" snapshot={snapB} mode={mode} />
+                            </div>
+                        )}
+                    </div>
 
                     <div className="center-mixer-xfader">
+                        <div className="center-mixer-master-readout">
+                            <span className={`center-mixer-master-chip master-${activeDeck.toLowerCase()}`}>
+                                MASTER {activeDeck}
+                            </span>
+                            <span className="center-mixer-master-value">
+                                {crossfaderPercent > 0 ? `+${crossfaderPercent}` : crossfaderPercent}
+                            </span>
+                        </div>
                         <span className="xfader-label xfader-a">A</span>
                         <input
                             type="range"
@@ -632,6 +647,123 @@ function DJView() {
             </div>
 
             {mode === "manual" && <TransitionsPanel />}
+            {mode === "autodj" && <AutoDjPanel />}
+        </div>
+    );
+}
+
+// ─── AutoDJ Activity Panel ──────────────────────────────────────
+
+function AutoDjPanel() {
+    const { conductorState, tracks, engineState, aiDecision } = useStore();
+    const cs = conductorState;
+
+    const templateScores = cs?.template_scores ?? aiDecision?.template_scores ?? null;
+    const reasoningTags = cs?.reasoning_tags ?? [];
+    const pendingTitle = cs?.pending_track_title ?? "—";
+    const phase = cs?.phase ?? "idle";
+    const message = cs?.message ?? "";
+    const confidence = cs?.confidence ?? aiDecision?.confidence ?? null;
+    const entryMarker = cs?.entry_marker ?? aiDecision?.entry_marker ?? null;
+
+    // Current playing track info
+    const activeDeckSnap = engineState?.deck_a?.state === "playing" ? engineState?.deck_a
+        : engineState?.deck_b?.state === "playing" ? engineState?.deck_b : null;
+    const currentTrack = activeDeckSnap?.track_id
+        ? tracks.find((t) => t.id === activeDeckSnap.track_id) : null;
+    const pendingTrack = cs?.pending_track_id
+        ? tracks.find((t) => t.id === cs.pending_track_id) : null;
+
+    const phaseLabel: Record<string, string> = {
+        idle: "Idle",
+        monitoring: "Monitoring",
+        planning: "Planning Next",
+        loading: "Loading Track",
+        aligning: "Aligning BPM",
+        transitioning: "Transitioning",
+    };
+
+    const phaseColor: Record<string, string> = {
+        idle: "var(--text-muted)",
+        monitoring: "var(--status-ready)",
+        planning: "var(--status-pending)",
+        loading: "var(--accent-a)",
+        aligning: "var(--accent-b)",
+        transitioning: "var(--status-active)",
+    };
+
+    return (
+        <div className="autodj-panel">
+            {/* Left: Session Status */}
+            <div className="autodj-panel-section autodj-session-status">
+                <span className="autodj-panel-header">SESSION</span>
+                <div className="autodj-phase-row">
+                    <span className="autodj-phase-dot" style={{ background: phaseColor[phase] || "var(--text-muted)" }} />
+                    <span className="autodj-phase-label">{phaseLabel[phase] || phase}</span>
+                </div>
+                {message && <span className="autodj-phase-message">{message}</span>}
+                {confidence != null && (
+                    <div className="autodj-stat-row">
+                        <span className="autodj-stat-label">Confidence</span>
+                        <span className="autodj-stat-value">{Math.round(confidence * 100)}%</span>
+                    </div>
+                )}
+                {entryMarker && (
+                    <div className="autodj-stat-row">
+                        <span className="autodj-stat-label">Entry Point</span>
+                        <span className="autodj-stat-value autodj-stat-marker">{entryMarker}</span>
+                    </div>
+                )}
+                {currentTrack && (
+                    <div className="autodj-stat-row">
+                        <span className="autodj-stat-label">Now</span>
+                        <span className="autodj-stat-value" title={currentTrack.title || ""}>{currentTrack.title || "—"}</span>
+                    </div>
+                )}
+                {pendingTrack && (
+                    <div className="autodj-stat-row">
+                        <span className="autodj-stat-label">Next</span>
+                        <span className="autodj-stat-value" title={pendingTrack.title || ""}>{pendingTrack.title || pendingTitle}</span>
+                    </div>
+                )}
+            </div>
+
+            {/* Center: Template Scores */}
+            {templateScores && templateScores.length > 0 && (
+                <div className="autodj-panel-section autodj-template-scores">
+                    <span className="autodj-panel-header">TEMPLATE SCORES</span>
+                    <div className="autodj-scores-grid">
+                        {templateScores.slice(0, 8).map(([name, score]) => (
+                            <div key={name} className="autodj-score-row">
+                                <span className="autodj-score-name">
+                                    {name.replace(/_/g, " ")}
+                                </span>
+                                <div className="autodj-score-bar-track">
+                                    <div
+                                        className="autodj-score-bar-fill"
+                                        style={{ width: `${Math.min(score * 100, 100)}%` }}
+                                    />
+                                </div>
+                                <span className="autodj-score-value">{(score * 100).toFixed(0)}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Right: Reasoning Tags */}
+            {reasoningTags.length > 0 && (
+                <div className="autodj-panel-section autodj-reasoning">
+                    <span className="autodj-panel-header">AI REASONING</span>
+                    <div className="autodj-tags-wrap">
+                        {reasoningTags.map((tag, i) => (
+                            <span key={i} className="autodj-reasoning-tag">
+                                {tag.replace(/_/g, " ")}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -641,7 +773,11 @@ function DJView() {
 function SettingsPanel() {
     const { aiConfig, setAiConfig, audioDevices, getAudioDevices, savePreference, loadPreference } = useStore();
     const [apiKey, setApiKey] = useState("");
-    const [provider, setProvider] = useState<"gemini" | "groq">(aiConfig?.provider === "groq" ? "groq" : "gemini");
+    const [provider, setProvider] = useState<"gemini" | "groq" | "ollama">(
+        aiConfig?.provider === "groq" ? "groq" : aiConfig?.provider === "ollama" ? "ollama" : "gemini"
+    );
+    const [ollamaModel, setOllamaModel] = useState(aiConfig?.provider === "ollama" ? (aiConfig?.model || "qwen2.5:7b") : "qwen2.5:7b");
+    const [ollamaEndpoint, setOllamaEndpoint] = useState("http://localhost:11434/v1");
     const [isSaving, setIsSaving] = useState(false);
     const [defaultTemplate, setDefaultTemplate] = useState("smooth_beatmix");
     const [defaultDuration, setDefaultDuration] = useState(16);
@@ -649,12 +785,17 @@ function SettingsPanel() {
 
     // Sync provider from config when it changes externally
     useEffect(() => {
-        if (aiConfig?.provider) setProvider(aiConfig.provider === "groq" ? "groq" : "gemini");
+        if (aiConfig?.provider) {
+            setProvider(aiConfig.provider === "groq" ? "groq" : aiConfig.provider === "ollama" ? "ollama" : "gemini");
+            if (aiConfig.provider === "ollama" && aiConfig.model) setOllamaModel(aiConfig.model);
+            if (aiConfig.provider === "ollama" && aiConfig.endpoint_url) setOllamaEndpoint(aiConfig.endpoint_url);
+        }
     }, [aiConfig?.provider]);
 
     const providerDefaults = {
-        gemini: { model: "gemini-2.5-flash", endpoint: "https://generativelanguage.googleapis.com/v1beta/models", placeholder: "AIzaSy..." },
-        groq: { model: "llama-3.3-70b-versatile", endpoint: "https://api.groq.com/openai/v1", placeholder: "gsk_..." },
+        gemini: { model: "gemini-2.5-flash", endpoint: "https://generativelanguage.googleapis.com/v1beta/models", placeholder: "AIzaSy...", needsKey: true },
+        groq: { model: "llama-3.3-70b-versatile", endpoint: "https://api.groq.com/openai/v1", placeholder: "gsk_...", needsKey: true },
+        ollama: { model: "qwen2.5:7b", endpoint: "http://localhost:11434/v1", placeholder: "", needsKey: false },
     };
 
     // Load audio devices and saved preferences
@@ -668,15 +809,26 @@ function SettingsPanel() {
         setIsSaving(true);
         try {
             const defaults = providerDefaults[provider];
-            await setAiConfig({
-                ...aiConfig,
-                enabled: true,
-                provider,
-                api_key: apiKey,
-                model: defaults.model,
-                endpoint_url: defaults.endpoint,
-            });
-            setApiKey("");
+            if (provider === "ollama") {
+                await setAiConfig({
+                    ...aiConfig,
+                    enabled: true,
+                    provider: "ollama",
+                    api_key: null,
+                    model: ollamaModel || defaults.model,
+                    endpoint_url: ollamaEndpoint || defaults.endpoint,
+                });
+            } else {
+                await setAiConfig({
+                    ...aiConfig,
+                    enabled: true,
+                    provider,
+                    api_key: apiKey,
+                    model: defaults.model,
+                    endpoint_url: defaults.endpoint,
+                });
+                setApiKey("");
+            }
         } catch (err) {
             console.error("Failed to save AI config:", err);
         } finally {
@@ -738,7 +890,7 @@ function SettingsPanel() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
                         <label style={labelStyle}>AI Provider</label>
                         <div style={{ display: "flex", gap: "4px", background: "rgba(0,0,0,0.2)", padding: "3px", borderRadius: "6px", border: "1px solid var(--border)" }}>
-                            {(["gemini", "groq"] as const).map(p => (
+                            {(["gemini", "groq", "ollama"] as const).map(p => (
                                 <button
                                     key={p}
                                     onClick={() => { setProvider(p); setApiKey(""); }}
@@ -747,7 +899,7 @@ function SettingsPanel() {
                                         padding: "8px",
                                         border: "none",
                                         borderRadius: "4px",
-                                        background: provider === p ? "var(--accent-a)" : "transparent",
+                                        background: provider === p ? (p === "ollama" ? "var(--status-ready)" : "var(--accent-a)") : "transparent",
                                         color: provider === p ? "var(--bg-deepest)" : "var(--text-muted)",
                                         fontWeight: 700,
                                         fontSize: "12px",
@@ -756,52 +908,84 @@ function SettingsPanel() {
                                         letterSpacing: "0.5px",
                                     }}
                                 >
-                                    {p === "gemini" ? "Gemini" : "Groq"}
+                                    {p === "gemini" ? "Gemini" : p === "groq" ? "Groq" : "Ollama"}
                                 </button>
                             ))}
                         </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-                        <label style={labelStyle}>{provider === "gemini" ? "Gemini" : "Groq"} API Key</label>
-                        {aiConfig?.api_key && aiConfig?.provider === provider && apiKey === "" ? (
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border)" }}>
-                                <span style={{ fontFamily: "monospace", color: "var(--status-ready)", flex: 1, fontSize: "14px" }}>
-                                    ✓ {aiConfig.api_key.substring(0, 4)}....{aiConfig.api_key.slice(-4)}
-                                </span>
-                                <button onClick={() => setApiKey(aiConfig.api_key)} style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text-secondary)", borderRadius: "4px", cursor: "pointer", padding: "4px 8px", fontSize: "10px", fontWeight: "bold" }}>
-                                    EDIT
-                                </button>
+                    {provider === "ollama" ? (
+                        <>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                                <label style={labelStyle}>Ollama Model</label>
+                                <input
+                                    type="text"
+                                    placeholder="qwen2.5:7b"
+                                    value={ollamaModel}
+                                    onChange={(e) => setOllamaModel(e.target.value)}
+                                    style={inputStyle}
+                                />
                             </div>
-                        ) : (
-                            <input
-                                type="password"
-                                placeholder={providerDefaults[provider].placeholder}
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                style={inputStyle}
-                            />
-                        )}
-                    </div>
-                    <div style={{ fontSize: "11px", color: "var(--text-muted)", padding: "6px 8px", background: "rgba(0,0,0,0.15)", borderRadius: "4px", lineHeight: 1.5 }}>
-                        {provider === "gemini"
-                            ? <>Model: <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>{providerDefaults.gemini.model}</span></>
-                            : <>Model: <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>{providerDefaults.groq.model}</span> &mdash; ultra-fast inference via Groq</>
-                        }
-                    </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                                <label style={labelStyle}>Ollama Endpoint</label>
+                                <input
+                                    type="text"
+                                    placeholder="http://localhost:11434/v1"
+                                    value={ollamaEndpoint}
+                                    onChange={(e) => setOllamaEndpoint(e.target.value)}
+                                    style={inputStyle}
+                                />
+                            </div>
+                            <div style={{ fontSize: "11px", color: "var(--text-muted)", padding: "6px 8px", background: "rgba(0,0,0,0.15)", borderRadius: "4px", lineHeight: 1.5 }}>
+                                Local inference &mdash; no API key needed. Make sure Ollama is running.
+                                <br />
+                                <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>ollama pull {ollamaModel}</span> to install the model.
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                                <label style={labelStyle}>{provider === "gemini" ? "Gemini" : "Groq"} API Key</label>
+                                {aiConfig?.api_key && aiConfig?.provider === provider && apiKey === "" ? (
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border)" }}>
+                                        <span style={{ fontFamily: "monospace", color: "var(--status-ready)", flex: 1, fontSize: "14px" }}>
+                                            ✓ {aiConfig.api_key.substring(0, 4)}....{aiConfig.api_key.slice(-4)}
+                                        </span>
+                                        <button onClick={() => setApiKey(aiConfig.api_key)} style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text-secondary)", borderRadius: "4px", cursor: "pointer", padding: "4px 8px", fontSize: "10px", fontWeight: "bold" }}>
+                                            EDIT
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <input
+                                        type="password"
+                                        placeholder={providerDefaults[provider].placeholder}
+                                        value={apiKey}
+                                        onChange={(e) => setApiKey(e.target.value)}
+                                        style={inputStyle}
+                                    />
+                                )}
+                            </div>
+                            <div style={{ fontSize: "11px", color: "var(--text-muted)", padding: "6px 8px", background: "rgba(0,0,0,0.15)", borderRadius: "4px", lineHeight: 1.5 }}>
+                                {provider === "gemini"
+                                    ? <>Model: <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>{providerDefaults.gemini.model}</span></>
+                                    : <>Model: <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>{providerDefaults.groq.model}</span> &mdash; ultra-fast inference via Groq</>
+                                }
+                            </div>
+                        </>
+                    )}
                     <button
                         onClick={handleSaveAi}
-                        disabled={isSaving || !apiKey}
+                        disabled={isSaving || (provider !== "ollama" && !apiKey)}
                         style={{
                             padding: "10px",
-                            background: apiKey ? "linear-gradient(135deg, var(--accent-a), #0099cc)" : "var(--bg-elevated)",
-                            color: apiKey ? "var(--bg-deepest)" : "var(--text-muted)",
+                            background: (provider === "ollama" || apiKey) ? "linear-gradient(135deg, var(--accent-a), #0099cc)" : "var(--bg-elevated)",
+                            color: (provider === "ollama" || apiKey) ? "var(--bg-deepest)" : "var(--text-muted)",
                             border: "none",
                             borderRadius: "6px",
                             fontWeight: "bold",
-                            cursor: isSaving || !apiKey ? "not-allowed" : "pointer",
+                            cursor: isSaving || (provider !== "ollama" && !apiKey) ? "not-allowed" : "pointer",
                         }}
                     >
-                        {isSaving ? "Saving..." : "Save AI Credentials"}
+                        {isSaving ? "Saving..." : provider === "ollama" ? "Save Ollama Config" : "Save AI Credentials"}
                     </button>
                 </div>
             )}
@@ -839,7 +1023,7 @@ function SettingsPanel() {
                         >
                             <option value="smooth_beatmix">Smooth Beatmix</option>
                             <option value="filter_sweep">Filter Sweep</option>
-                            <option value="echo_drop">Echo Drop</option>
+                            <option value="echo_drop">Echo Drop (Sim)</option>
                             <option value="drop_swap">Drop Swap</option>
                             <option value="loop_roll">Loop Roll</option>
                             <option value="bass_kill_swap">Bass Kill Swap</option>
@@ -879,7 +1063,7 @@ function SettingsPanel() {
 // ─── App ─────────────────────────────────────────────────────────
 
 export default function App() {
-    const { activeView, setActiveView, setEngineState } = useStore();
+    const { activeView, setActiveView, setEngineState, setConductorState } = useStore();
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
     useEffect(() => {
@@ -888,6 +1072,11 @@ export default function App() {
 
         const unlisten = listen<EngineState>("engine-state", (event) => {
             setEngineState(event.payload);
+        });
+
+        // Listen for conductor state from the backend AutoDJ loop
+        const unlistenConductor = listen<any>("conductor-state", (event) => {
+            setConductorState(event.payload);
         });
 
         // ── Drag & Drop Listener ──
@@ -952,10 +1141,11 @@ export default function App() {
 
         return () => {
             unlisten.then(f => f());
+            unlistenConductor.then(f => f());
             unlistenDrop.then(f => f());
             window.removeEventListener("keydown", handleKeyDown);
         };
-    }, [setEngineState]);
+    }, [setEngineState, setConductorState]);
 
     return (
         <div className="app">

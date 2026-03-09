@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useStore, DjMode, AiDecision, EngineState, AutodjStatus, AiDebugInfo } from "../store";
+import { useState } from "react";
+import { useStore, DjMode, EngineState } from "../store";
+import { formatTime } from "./utils";
 
 const SPECTRUM_LABELS = ["32", "64", "125", "250", "500", "1K", "2K", "4K"];
 
@@ -18,263 +19,120 @@ function SpectrumAnalyzer({ spectrum }: { spectrum: number[] }) {
     );
 }
 
-export function AiBar() {
-    const { mode, setMode, requestNextTrack, aiDecision, isThinking, tracks, loadTrack, engineState, clearAiDecision, autodjStatus, autodjMessage, setAutodjStatus } = useStore();
+function humanizeToken(token: string): string {
+    return token.replace(/_/g, " ").trim();
+}
 
-    const suggestedTrack = aiDecision?.track_selection
-        ? tracks.find(t => t.id === aiDecision.track_selection)
-        : null;
+function templateLabel(template: string | null | undefined): string | null {
+    if (!template) return null;
+    return humanizeToken(template)
+        .split(" ")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ");
+}
 
-    // ─── Autonomous AutoDJ Controller ────────────────────────────
-    const autodjPhaseRef = useRef<"idle" | "monitoring" | "planning" | "loading" | "aligning" | "transitioning">("idle");
-    const pendingTrackRef = useRef<string | null>(null);
-    const transitionLockRef = useRef(false);
-    const cachedProfileRef = useRef<any>(null);
-    const cachedProfileTrackIdRef = useRef<string | null>(null);
+function decisionSourceLabel(
+    source: string | null | undefined
+): { label: string; kind: "llm" | "heuristic" | "queue" | "none"; detail: string | null } {
+    if (!source) return { label: "", kind: "none", detail: null };
+    if (source.startsWith("llm_live:")) {
+        return { label: "LLM advisory", kind: "llm", detail: source };
+    }
+    if (source.includes("queue")) {
+        return { label: "Queue driven", kind: "queue", detail: source };
+    }
+    if (source === "heuristic_only") {
+        return { label: "Heuristic scorer", kind: "heuristic", detail: source };
+    }
+    return {
+        label: "Heuristic scorer",
+        kind: "heuristic",
+        detail: humanizeToken(source),
+    };
+}
 
-    useEffect(() => {
-        if (mode !== "autodj") {
-            autodjPhaseRef.current = "idle";
-            pendingTrackRef.current = null;
-            transitionLockRef.current = false;
-            cachedProfileRef.current = null;
-            cachedProfileTrackIdRef.current = null;
-            setAutodjStatus("idle");
-            return;
+function fallbackReasonLabel(reason: string | null | undefined): { label: string | null; isExpected: boolean } {
+    if (!reason) return { label: null, isExpected: false };
+    const map: Record<string, string> = {
+        missing_api_key: "No API key -> heuristic",
+        disabled: "LLM disabled -> heuristic",
+        provider_error: "LLM unavailable -> heuristic",
+        provider_offline: "Provider offline -> heuristic",
+        timeout: "LLM timeout -> heuristic",
+        parse_failure: "LLM parse failed -> heuristic",
+        schema_validation_failure: "LLM schema mismatch -> heuristic",
+        unsafe_action_rejected: "Unsafe action rejected",
+        insufficient_confidence: "Low confidence -> fallback",
+        planner_error: "Planner error -> runtime fallback",
+        queue_override: "Queue override",
+        queue_seed: "Queue seed",
+        initial_random_seed: "Initial random seed",
+        silence_recovery: "Silence recovery",
+        emergency_guard: "Emergency guard",
+        default_template: "Default template fallback",
+    };
+    return {
+        label: map[reason] || "Fallback to heuristic scorer",
+        isExpected: [
+            "missing_api_key",
+            "disabled",
+            "provider_offline",
+            "queue_override",
+            "queue_seed",
+            "initial_random_seed",
+        ].includes(reason),
+    };
+}
+
+function formatTriggerReason(
+    reason: string | null | undefined
+): { short: string; detail: string; isMarkerAware: boolean } | null {
+    if (!reason) return null;
+    if (reason.startsWith("window:")) {
+        const match = reason.match(/^window:(.+?)@(\d+)ms$/);
+        if (match) {
+            const anchor = humanizeToken(match[1]);
+            const ms = parseInt(match[2], 10);
+            const sec = (ms / 1000).toFixed(1);
+            return { short: anchor, detail: `Marker: ${anchor} at ${sec}s`, isMarkerAware: true };
         }
-        setAutodjStatus("starting", "Initializing AutoDJ...");
-        autodjPhaseRef.current = "idle";
-    }, [mode]);
+        return { short: "Marker", detail: reason, isMarkerAware: true };
+    }
+    if (reason.startsWith("fallback:") || reason.startsWith("classic:") || reason.startsWith("no_profile:")) {
+        return { short: "Position", detail: "Position fallback trigger", isMarkerAware: false };
+    }
+    if (reason.startsWith("emergency") || reason === "silence_recovery") {
+        return { short: "Emergency", detail: humanizeToken(reason), isMarkerAware: false };
+    }
+    return null;
+}
 
-    // Main AutoDJ tick
-    useEffect(() => {
-        if (mode !== "autodj") return;
+function deriveActiveDeckId(engineState: EngineState | null): "a" | "b" {
+    if (!engineState) return "a";
+    const aPlaying = engineState.deck_a.state === "playing";
+    const bPlaying = engineState.deck_b.state === "playing";
 
-        const tick = async () => {
-            const state = useStore.getState();
-            const es = state.engineState;
-            if (!es) return;
+    if (aPlaying && !bPlaying) return "a";
+    if (bPlaying && !aPlaying) return "b";
+    return engineState.crossfader <= 0 ? "a" : "b";
+}
 
-            const deckA = es.deck_a;
-            const deckB = es.deck_b;
-            const aPlaying = deckA.state === "playing";
-            const bPlaying = deckB.state === "playing";
-            const analyzedTracks = state.tracks.filter(t => t.import_status === "analyzed");
+function formatEta(ms: number): string {
+    if (ms <= 0) return "now";
+    return `in ${formatTime(ms)}`;
+}
 
-            if (!aPlaying && !bPlaying) {
-                if (autodjPhaseRef.current === "transitioning") return;
-                if (analyzedTracks.length === 0) {
-                    setAutodjStatus("error", "No analyzed tracks in library");
-                    return;
-                }
-                if (autodjPhaseRef.current === "idle" || autodjPhaseRef.current === "monitoring") {
-                    autodjPhaseRef.current = "planning";
-                    setAutodjStatus("picking_first_track", "Selecting first track...");
-                    const queueFirst = state.advanceQueue();
-                    const pick = queueFirst
-                        ? analyzedTracks.find(t => t.id === queueFirst) || analyzedTracks[0]
-                        : analyzedTracks[Math.floor(Math.random() * analyzedTracks.length)];
-                    await state.loadTrack("a", pick.id);
-                    autodjPhaseRef.current = "monitoring";
-                    setAutodjStatus("monitoring", `Playing: ${pick.title || "Unknown"}`);
-                    return;
-                }
-                return;
-            }
+export function AiBar() {
+    const { mode, setMode, requestNextTrack, aiDecision, isThinking, tracks, loadTrack, engineState, conductorState } = useStore();
 
-            const playingDeck: "a" | "b" = aPlaying ? "a" : "b";
-            const idleDeck: "a" | "b" = playingDeck === "a" ? "b" : "a";
-            const playingSnap = playingDeck === "a" ? deckA : deckB;
-            const idleSnap = playingDeck === "a" ? deckB : deckA;
-            const positionFrac = playingSnap.position_fraction;
-            const positionMs = playingSnap.position_ms;
-            const emergencyFraction = 0.92;
+    const cs = conductorState;
+    const suggestedTrackId = mode === "autodj"
+        ? cs?.pending_track_id
+        : (cs?.pending_track_id || aiDecision?.track_selection);
 
-            const playingTrackId = playingSnap.track_id;
-            if (playingTrackId && playingTrackId !== cachedProfileTrackIdRef.current) {
-                try {
-                    const profile = await state.getTrackProfile(playingTrackId);
-                    cachedProfileRef.current = profile;
-                    cachedProfileTrackIdRef.current = playingTrackId;
-                } catch {
-                    cachedProfileRef.current = null;
-                }
-            }
-
-            const profile = cachedProfileRef.current;
-
-            // Silence detection
-            if (es.silence_frames > 90 && !transitionLockRef.current) {
-                autodjPhaseRef.current = "planning";
-                setAutodjStatus("error", "Silence detected — loading next track...");
-                const others = analyzedTracks.filter(t => t.id !== playingSnap.track_id);
-                if (others.length > 0) {
-                    const pick = others[Math.floor(Math.random() * others.length)];
-                    await state.loadTrack(idleDeck, pick.id);
-                    await new Promise(r => setTimeout(r, 500));
-                    transitionLockRef.current = true;
-                    autodjPhaseRef.current = "transitioning";
-                    try {
-                        await state.executeTransition(idleDeck.toUpperCase(), "filter_sweep", 4);
-                    } catch (e) {
-                        console.error("Silence recovery transition failed:", e);
-                    }
-                    setTimeout(() => {
-                        transitionLockRef.current = false;
-                        autodjPhaseRef.current = "monitoring";
-                        cachedProfileRef.current = null;
-                        cachedProfileTrackIdRef.current = null;
-                        state.clearAiDecision();
-                        setAutodjStatus("monitoring", "Recovered from silence");
-                    }, 3000);
-                }
-                return;
-            }
-
-            if (autodjPhaseRef.current !== "monitoring") {
-                if (positionFrac > emergencyFraction && !transitionLockRef.current) {
-                    if (idleSnap.state !== "empty" && idleSnap.state !== "playing") {
-                        transitionLockRef.current = true;
-                        autodjPhaseRef.current = "transitioning";
-                        setAutodjStatus("transitioning", "Emergency transition!");
-                        try {
-                            await state.executeTransition(idleDeck.toUpperCase(), "filter_sweep", 8);
-                        } catch (e) {
-                            console.error("Emergency transition failed:", e);
-                        }
-                        setTimeout(() => {
-                            transitionLockRef.current = false;
-                            autodjPhaseRef.current = "monitoring";
-                            pendingTrackRef.current = null;
-                            cachedProfileRef.current = null;
-                            cachedProfileTrackIdRef.current = null;
-                            state.clearAiDecision();
-                            setAutodjStatus("monitoring", "Monitoring playback...");
-                        }, 5000);
-                    }
-                }
-                return;
-            }
-
-            // Section-aware transition trigger
-            let shouldTrigger = false;
-            let triggerReason = "";
-
-            if (profile?.transition_windows?.length > 0) {
-                const futureWindows = (profile.transition_windows as Array<{anchor: string, start_ms: number, end_ms: number, score: number}>)
-                    .filter((w) => w.start_ms > positionMs && w.start_ms - positionMs < 30_000)
-                    .sort((a, b) => b.score - a.score);
-
-                if (futureWindows.length > 0) {
-                    const best = futureWindows[0];
-                    if (best.start_ms - positionMs < 2000) {
-                        shouldTrigger = true;
-                        triggerReason = `window:${best.anchor}@${best.start_ms}ms`;
-                    }
-                } else if (positionFrac >= 0.75) {
-                    shouldTrigger = true;
-                    triggerReason = "fallback:75%";
-                }
-            } else {
-                if (positionFrac >= 0.75) {
-                    shouldTrigger = true;
-                    triggerReason = "classic:75%";
-                }
-            }
-
-            if (shouldTrigger && !state.isThinking && !transitionLockRef.current) {
-                autodjPhaseRef.current = "planning";
-
-                const queueTrackId = state.advanceQueue();
-                if (queueTrackId) {
-                    setAutodjStatus("selecting_next", `Queue: next track`);
-                    pendingTrackRef.current = queueTrackId;
-                } else {
-                    setAutodjStatus("selecting_next", `AI selecting...`);
-                    const decision = await state.requestNextTrack();
-                    if (!decision || !decision.track_selection) {
-                        if (analyzedTracks.length > 1) {
-                            const others = analyzedTracks.filter(t => t.id !== playingSnap.track_id);
-                            pendingTrackRef.current = others[Math.floor(Math.random() * others.length)].id;
-                        } else if (analyzedTracks.length === 1) {
-                            pendingTrackRef.current = analyzedTracks[0].id;
-                        } else {
-                            autodjPhaseRef.current = "monitoring";
-                            setAutodjStatus("error", "No tracks to transition to");
-                            return;
-                        }
-                    } else {
-                        pendingTrackRef.current = decision.track_selection;
-                    }
-                }
-
-                const nextTrackId = pendingTrackRef.current!;
-                const nextTrack = state.tracks.find(t => t.id === nextTrackId);
-                setAutodjStatus("loading_next", `Loading: ${nextTrack?.title || "next track"}...`);
-                autodjPhaseRef.current = "loading";
-
-                await state.loadTrack(idleDeck, nextTrackId);
-                await new Promise(r => setTimeout(r, 300));
-
-                // Phrase alignment
-                if (profile?.phrases?.boundaries_ms?.length > 0) {
-                    autodjPhaseRef.current = "aligning";
-                    setAutodjStatus("transitioning", "Aligning to phrase boundary...");
-                    const boundaries = profile.phrases.boundaries_ms as number[];
-                    const curPos = useStore.getState().engineState
-                        ? (playingDeck === "a" ? useStore.getState().engineState!.deck_a.position_ms : useStore.getState().engineState!.deck_b.position_ms)
-                        : positionMs;
-                    const nextBoundary = boundaries.find((b: number) => b > curPos);
-                    if (nextBoundary && nextBoundary - curPos < 15_000) {
-                        await new Promise<void>(resolve => {
-                            const check = setInterval(() => {
-                                const snap = useStore.getState().engineState;
-                                if (!snap) { clearInterval(check); resolve(); return; }
-                                const nowPos = playingDeck === "a" ? snap.deck_a.position_ms : snap.deck_b.position_ms;
-                                if (nowPos >= nextBoundary - 100) { clearInterval(check); resolve(); }
-                            }, 100);
-                            setTimeout(() => resolve(), 15_000);
-                        });
-                    }
-                }
-
-                transitionLockRef.current = true;
-                autodjPhaseRef.current = "transitioning";
-
-                const plan = state.aiDecision?.transition_plan;
-                const templateName = plan?.template_name || "smooth_beatmix";
-                const overrides = plan?.parameter_overrides || {};
-                const durationBars = overrides.duration_bars || 16;
-
-                setAutodjStatus("transitioning", `${templateName} → ${nextTrack?.title || "Unknown"}`);
-
-                try {
-                    await state.executeTransition(idleDeck.toUpperCase(), templateName, durationBars);
-                } catch (e) {
-                    console.error("Transition failed:", e);
-                }
-
-                const bpm = es.master_bpm || 128;
-                const transitionMs = (durationBars / bpm) * 60 * 4 * 1000;
-                setTimeout(() => {
-                    transitionLockRef.current = false;
-                    autodjPhaseRef.current = "monitoring";
-                    pendingTrackRef.current = null;
-                    cachedProfileRef.current = null;
-                    cachedProfileTrackIdRef.current = null;
-                    useStore.getState().clearAiDecision();
-                    const curEs = useStore.getState().engineState;
-                    const nowPlayingId = idleDeck === "a" ? curEs?.deck_a?.track_id : curEs?.deck_b?.track_id;
-                    const nowTrack = useStore.getState().tracks.find(t => t.id === nowPlayingId);
-                    setAutodjStatus("monitoring", `Playing: ${nowTrack?.title || "Unknown"}`);
-                }, Math.min(transitionMs + 1000, 60000));
-            }
-        };
-
-        const interval = setInterval(tick, 500);
-        tick();
-        return () => clearInterval(interval);
-    }, [mode]);
+    const suggestedTrack = suggestedTrackId
+        ? tracks.find((t) => t.id === suggestedTrackId)
+        : null;
 
     const getModeLabel = (m: DjMode) => {
         switch (m) {
@@ -284,16 +142,64 @@ export function AiBar() {
         }
     };
 
-    const activeDeck = engineState?.deck_a?.state === "playing" ? "A" : "B";
-    const currentTrackId = activeDeck === "A" ? engineState?.deck_a?.track_id : engineState?.deck_b?.track_id;
-    const currentTrack = tracks.find(t => t.id === currentTrackId);
-    const currentTrackName = currentTrack?.title || "Nothing playing";
-    const displayBpm = currentTrack?.bpm?.toFixed(1) || engineState?.master_bpm?.toFixed(1) || "128.0";
+    const activeDeckId = deriveActiveDeckId(engineState);
+    const activeDeckSnap = activeDeckId === "a" ? engineState?.deck_a : engineState?.deck_b;
+    const currentTrackId = activeDeckSnap?.track_id;
+    const currentTrack = tracks.find((t) => t.id === currentTrackId);
+    const isAnythingPlaying = engineState?.deck_a?.state === "playing" || engineState?.deck_b?.state === "playing";
+    const currentTrackName = currentTrack?.title || (isAnythingPlaying ? "Loading..." : "Nothing playing");
+    const currentArtist = currentTrack?.artist || "";
+    const liveBpm = (activeDeckSnap?.speed && currentTrack?.bpm)
+        ? currentTrack.bpm * activeDeckSnap.speed
+        : currentTrack?.bpm ?? engineState?.master_bpm;
+    const displayBpm = liveBpm?.toFixed(1) || "--";
+
+    // Backend conductor state is the primary source for AutoDJ runtime state.
+    const templateChosen = templateLabel(cs?.template_chosen ?? aiDecision?.transition_plan?.template_name);
+    const templateIsSimulated = cs?.decision_meta?.template_is_simulated ?? null;
+    const confidence = cs?.confidence ?? aiDecision?.confidence ?? null;
+    const decisionSource = decisionSourceLabel(
+        mode === "autodj"
+            ? cs?.decision_source
+            : (cs?.decision_source ?? aiDecision?.planner_mode)
+    );
+    const fallback = fallbackReasonLabel(
+        mode === "autodj"
+            ? cs?.fallback_reason
+            : (cs?.fallback_reason ?? aiDecision?.fallback_reason)
+    );
+    const entryMarker = cs?.entry_marker ?? aiDecision?.entry_marker ?? null;
+    const triggerInfo = formatTriggerReason(cs?.trigger_meta?.reason ?? cs?.trigger_reason);
+    const conductorMessage = cs?.message || "";
+    const conductorPhase = cs?.phase || "idle";
+    const conductorActive = cs?.active ?? false;
+    const suggestedTitle = suggestedTrack?.title || cs?.pending_track_title || "--";
+
+    const triggerAnchor = cs?.trigger_meta?.anchor ? humanizeToken(cs.trigger_meta.anchor) : null;
+    const triggerWindowStartMs = cs?.trigger_meta?.window_start_ms ?? null;
+    const observedPositionMs = cs?.trigger_meta?.observed_position_ms ?? activeDeckSnap?.position_ms ?? null;
+    const windowEtaMs = triggerWindowStartMs != null && observedPositionMs != null
+        ? triggerWindowStartMs - observedPositionMs
+        : null;
+    const triggerKind = cs?.trigger_meta?.kind ?? null;
+
+    const transitionIntent = triggerKind === "transition_window"
+        ? `${triggerAnchor ? `${triggerAnchor} window` : "Marker window"} ${windowEtaMs != null ? formatEta(windowEtaMs) : ""}`.trim()
+        : triggerInfo?.detail ?? null;
+
+    const autodjPhase: "active" | "transitioning" | "error" =
+        conductorPhase === "transitioning" ? "transitioning" :
+        cs?.error ? "error" : "active";
+
+    const statusMessage = mode === "autodj"
+        ? (conductorActive
+            ? (transitionIntent || conductorMessage || "Monitoring marker windows")
+            : (suggestedTrackId ? `Prepared: ${suggestedTitle}` : "Idle"))
+        : (aiDecision ? `Suggested: ${suggestedTitle}` : "");
 
     return (
-        <div className="ai-bar">
-            {/* Mode Switcher */}
-            <div className="ai-bar-modes">
+        <div className="conductor-rail">
+            <div className="conductor-mode">
                 <div className="mode-pill-container">
                     {(["manual", "assisted", "autodj"] as DjMode[]).map((m) => (
                         <button
@@ -307,56 +213,190 @@ export function AiBar() {
                 </div>
             </div>
 
-            {/* Now Playing */}
-            <div className="ai-bar-now">
-                <span className="ai-bar-label">NOW</span>
-                <span className="ai-bar-track">{currentTrackName}</span>
-                <span className="ai-bar-bpm">{displayBpm}</span>
-            </div>
-
-            {/* Spectrum */}
-            <div className="ai-bar-spectrum">
-                <SpectrumAnalyzer spectrum={engineState?.spectrum ?? []} />
-            </div>
-
-            {/* Up Next / AI Suggestion */}
-            <div className="ai-bar-next">
-                {suggestedTrack ? (
-                    <>
-                        <span className="ai-bar-label ai-bar-label-next">NEXT</span>
-                        <span className="ai-bar-track">{suggestedTrack.title || "Unknown"}</span>
-                        <span className="ai-bar-bpm">{suggestedTrack.bpm?.toFixed(1)}</span>
-                        <button className="ai-bar-queue-btn" onClick={() => loadTrack("b", suggestedTrack.id)}>
-                            Queue →
-                        </button>
-                    </>
-                ) : (
-                    <span className="ai-bar-empty">
-                        {isThinking ? "AI thinking..." : "No suggestion"}
+            <div className={`conductor-now ${activeDeckId === "a" ? "deck-a-active" : "deck-b-active"}`}>
+                <div className="conductor-section-header">
+                    <span className="conductor-section-label">NOW</span>
+                    <span className={`conductor-active-deck conductor-active-deck-${activeDeckId}`}>
+                        DECK {activeDeckId.toUpperCase()}
                     </span>
+                    {isAnythingPlaying && (
+                        <span className="conductor-live-chip">ON AIR</span>
+                    )}
+                </div>
+                <div className="conductor-track-primary">
+                    <span className={`conductor-deck-pip conductor-deck-pip-${activeDeckId}`} />
+                    <span className="conductor-track-name">{currentTrackName}</span>
+                </div>
+                <div className="conductor-track-sub">
+                    {currentArtist && <span className="conductor-track-artist">{currentArtist}</span>}
+                    {displayBpm !== "--" && <span className="conductor-bpm">{displayBpm}</span>}
+                </div>
+            </div>
+
+            <div className="conductor-bridge">
+                <div className={`conductor-bridge-inner ${conductorPhase === "transitioning" ? "active" : ""}`}>
+                    {templateChosen && mode !== "manual" ? (
+                        <div className="conductor-bridge-detail">
+                            <span className="conductor-template-chip">{templateChosen}</span>
+                            {templateIsSimulated === true && (
+                                <span
+                                    className="conductor-template-sim-chip"
+                                    title="Template is simulated with gain/filter automation (not dedicated DSP)"
+                                >
+                                    SIM
+                                </span>
+                            )}
+                            {triggerInfo && (
+                                <span
+                                    className={`conductor-trigger-chip ${triggerInfo.isMarkerAware ? "conductor-trigger-marker" : "conductor-trigger-fallback"}`}
+                                    title={triggerInfo.detail}
+                                >
+                                    {triggerInfo.short}
+                                </span>
+                            )}
+                        </div>
+                    ) : triggerInfo ? (
+                        <div className="conductor-bridge-detail">
+                            <span
+                                className={`conductor-trigger-chip ${triggerInfo.isMarkerAware ? "conductor-trigger-marker" : "conductor-trigger-fallback"}`}
+                                title={triggerInfo.detail}
+                            >
+                                {triggerInfo.short}
+                            </span>
+                        </div>
+                    ) : (
+                        <span className="conductor-arrow-glyph">&rarr;</span>
+                    )}
+                    {entryMarker && (
+                        <div className="conductor-marker-row">
+                            <span className="conductor-marker-chip entry" title="Entry point on incoming track">{entryMarker}</span>
+                        </div>
+                    )}
+                </div>
+                {transitionIntent && (
+                    <div className="conductor-bridge-intent" title={transitionIntent}>
+                        {transitionIntent}
+                    </div>
                 )}
             </div>
 
-            {/* Action */}
-            <div className="ai-bar-action">
+            <div className="conductor-next">
+                <span className="conductor-section-label conductor-section-label-b">NEXT</span>
+                <div className="conductor-track-primary">
+                    {suggestedTrackId ? (
+                        <span className="conductor-track-name conductor-track-name-next">
+                            {suggestedTitle}
+                        </span>
+                    ) : (
+                        <span className="conductor-empty">
+                            {isThinking || conductorPhase === "planning" ? "Scoring tracks..." : "--"}
+                        </span>
+                    )}
+                </div>
+                {suggestedTrackId && (
+                    <div className="conductor-track-sub">
+                        {suggestedTrack?.bpm && <span className="conductor-bpm conductor-bpm-b">{suggestedTrack.bpm.toFixed(1)}</span>}
+                        {suggestedTrack?.key && <span className="conductor-key">{suggestedTrack.key}</span>}
+                        {triggerAnchor && <span className="conductor-next-intent">{triggerAnchor}</span>}
+                        {mode !== "autodj" && (
+                            <button
+                                className="conductor-queue-btn"
+                                onClick={() => suggestedTrack && loadTrack("b", suggestedTrack.id)}
+                                disabled={!suggestedTrack}
+                            >
+                                LOAD B
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            <div className="conductor-spectrum">
+                <SpectrumAnalyzer spectrum={engineState?.spectrum ?? []} />
+            </div>
+
+            <div className="conductor-action">
                 {mode === "autodj" ? (
-                    <div className="ai-bar-status">
-                        <div className={`status-dot ${autodjStatus === "transitioning" ? "transitioning" : autodjStatus === "error" ? "error" : "active"}`} />
-                        <span>{autodjMessage || "AI is DJing"}</span>
+                    <div className={`conductor-autodj-status conductor-autodj-${autodjPhase}`}>
+                        <div className={`conductor-status-dot conductor-dot-${autodjPhase}`} />
+                        <div className="conductor-status-body">
+                            <div className="conductor-status-top">
+                                <span className="conductor-status-mode">AUTO-DJ</span>
+                                {decisionSource.kind !== "none" && (
+                                    <span
+                                        className={`conductor-source-chip conductor-source-${decisionSource.kind}`}
+                                        title={decisionSource.detail ?? undefined}
+                                    >
+                                        {decisionSource.label}
+                                    </span>
+                                )}
+                            </div>
+                            <span className="conductor-status-message">{statusMessage}</span>
+                            {fallback.label && (
+                                <span
+                                    className={`conductor-fallback-chip ${fallback.isExpected ? "expected" : "warn"}`}
+                                    title={cs?.fallback_reason ?? aiDecision?.fallback_reason ?? undefined}
+                                >
+                                    {fallback.label}
+                                </span>
+                            )}
+                        </div>
+                        {confidence != null && (
+                            <span
+                                className="conductor-confidence"
+                                title="Planner confidence score (coarse; no full score breakdown exposed yet)"
+                            >
+                                {Math.round(confidence * 100)}%
+                            </span>
+                        )}
                     </div>
                 ) : (
-                    <button
-                        onClick={requestNextTrack}
-                        disabled={isThinking}
-                        className={`ai-bar-find-btn ${isThinking ? "thinking" : ""}`}
-                    >
-                        {isThinking ? "..." : "Find Next"}
-                    </button>
+                    <div className="conductor-manual-action">
+                        <button
+                            onClick={requestNextTrack}
+                            disabled={isThinking}
+                            className={`conductor-find-btn ${isThinking ? "thinking" : ""}`}
+                        >
+                            {isThinking ? (
+                                <><span className="transition-spinner" /> Scoring</>
+                            ) : "Find Next"}
+                        </button>
+                        {decisionSource.kind !== "none" && (
+                            <span
+                                className={`conductor-source-chip conductor-source-${decisionSource.kind}`}
+                                title={decisionSource.detail ?? undefined}
+                            >
+                                {decisionSource.label}
+                            </span>
+                        )}
+                        {fallback.label && (
+                            <span
+                                className={`conductor-fallback-chip ${fallback.isExpected ? "expected" : "warn"}`}
+                                title={aiDecision?.fallback_reason ?? undefined}
+                            >
+                                {fallback.label}
+                            </span>
+                        )}
+                    </div>
                 )}
             </div>
         </div>
     );
 }
+
+// Honest template descriptions — per reality_audit.md #6
+const TEMPLATE_INFO: Record<string, { label: string; desc: string; simulated?: boolean }> = {
+    smooth_beatmix:  { label: "Smooth Beatmix",      desc: "Crossfade with EQ blending" },
+    filter_sweep:    { label: "Filter Sweep",        desc: "Low-pass filter transition" },
+    echo_drop:       { label: "Echo Drop (Sim)",     desc: "Simulated echo via gain ramp (no DSP delay)", simulated: true },
+    drop_swap:       { label: "Drop Swap",           desc: "Cut at the drop point" },
+    loop_roll:       { label: "Loop Roll",           desc: "Loop tightening into transition" },
+    bass_kill_swap:  { label: "Bass Kill Swap",      desc: "EQ kill bass swap" },
+    break_blend:     { label: "Break Blend",         desc: "Blend during breakdown section" },
+    backspin_cut:    { label: "Backspin Cut (Sim)",  desc: "Simulated backspin via gain ramp (use spinback for real reverse)", simulated: true },
+    drop_ride:       { label: "Drop Ride",           desc: "Dual-drop ride with bass swap" },
+    fx_echo_slam:    { label: "FX Echo Slam (Sim)",  desc: "Simulated echo out + filter slam (app-layer, no DSP)", simulated: true },
+};
 
 export function TransitionsPanel() {
     const { executeTransition, engineState } = useStore();
@@ -396,6 +436,9 @@ export function TransitionsPanel() {
         }
     };
 
+    const templateDesc = TEMPLATE_INFO[template]?.desc || "";
+    const selectedTemplateIsSimulated = TEMPLATE_INFO[template]?.simulated ?? false;
+
     return (
         <div className={`transitions-panel ${isTransitioning ? "transitions-panel--active" : ""}`}>
             <span className="transitions-panel-label">TRANSITION</span>
@@ -405,14 +448,18 @@ export function TransitionsPanel() {
                 disabled={isTransitioning}
                 className="transition-select"
             >
-                <option value="smooth_beatmix">Smooth Beatmix</option>
-                <option value="filter_sweep">Filter Sweep</option>
-                <option value="echo_drop">Echo Drop</option>
-                <option value="drop_swap">Drop Swap</option>
-                <option value="loop_roll">Loop Roll</option>
-                <option value="bass_kill_swap">Bass Kill Swap</option>
-                <option value="break_blend">Break Blend</option>
+                {Object.entries(TEMPLATE_INFO).map(([key, info]) => (
+                    <option key={key} value={key}>{info.label}</option>
+                ))}
             </select>
+            {templateDesc && (
+                <span className="transition-desc">{templateDesc}</span>
+            )}
+            {selectedTemplateIsSimulated && (
+                <span className="transition-sim-chip" title="This transition is simulated, not dedicated DSP">
+                    SIMULATED
+                </span>
+            )}
             <div className="transition-duration-control">
                 <span className="transition-duration-label">{duration}b</span>
                 <input
@@ -438,7 +485,7 @@ export function TransitionsPanel() {
                     <div className="transition-progress-bar" style={{ animationDuration: `${transitionDurationMs}ms` }} />
                 </div>
             )}
-            {errorMsg && <div className="transition-error-toast">⚠ {errorMsg}</div>}
+            {errorMsg && <div className="transition-error-toast">{errorMsg}</div>}
         </div>
     );
 }
