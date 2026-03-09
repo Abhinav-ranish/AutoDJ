@@ -1,4 +1,4 @@
-//! LLM Client supporting Gemini and Groq (OpenAI-compatible) APIs.
+//! LLM Client supporting Gemini, Groq (OpenAI-compatible), and Ollama (local) APIs.
 
 use crate::{AiConfig, AiError};
 use reqwest::{Client, header};
@@ -32,6 +32,7 @@ impl LlmClient {
     ) -> Result<String, AiError> {
         match config.provider.as_str() {
             "groq" => self.query_groq(prompt, context_json, config).await,
+            "ollama" => self.query_ollama(prompt, context_json, config).await,
             _ => self.query_gemini(prompt, context_json, config).await,
         }
     }
@@ -148,6 +149,91 @@ impl LlmClient {
             .and_then(|m| m.get("content"))
             .and_then(|c| c.as_str())
             .ok_or_else(|| AiError::ParseError("Failed to extract message content from Groq payload".to_string()))?;
+
+        Ok(content.to_string())
+    }
+
+    /// Ollama local inference API (OpenAI-compatible).
+    ///
+    /// No API key required — Ollama runs locally on the user's machine.
+    /// Default endpoint: http://localhost:11434/v1
+    async fn query_ollama(
+        &self,
+        prompt: &str,
+        context_json: &str,
+        config: &AiConfig,
+    ) -> Result<String, AiError> {
+        let model = if config.model.is_empty() {
+            "qwen3:4b"
+        } else {
+            &config.model
+        };
+
+        let base_url = config
+            .endpoint_url
+            .as_deref()
+            .unwrap_or("http://localhost:11434/v1");
+
+        let url = format!("{}/chat/completions", base_url);
+
+        let payload = json!({
+            "model": model,
+            "messages": [
+                { "role": "system", "content": prompt },
+                { "role": "user", "content": context_json }
+            ],
+            "temperature": 0.2,
+            "response_format": { "type": "json_object" },
+            "stream": false
+        });
+
+        // Ollama is local — no bearer token needed, but use longer timeout
+        // since local inference can be much slower than cloud APIs,
+        // especially on cold start when the model is loading into memory.
+        let timeout_secs = config.timeout_seconds.max(120) as u64;
+        let mut ollama_config = config.clone();
+        ollama_config.timeout_seconds = timeout_secs as u32;
+
+        let body = self
+            .send_request(&url, &payload, &ollama_config, None)
+            .await
+            .map_err(|e| {
+                let msg = format!("{e}");
+                if msg.contains("Connection refused") || msg.contains("connect error") {
+                    AiError::LlmError(
+                        "Ollama is not running. Start it with `ollama serve` or launch the Ollama app."
+                            .to_string(),
+                    )
+                } else {
+                    e
+                }
+            })?;
+
+        // Parse OpenAI-compatible response: body.choices[0].message.content
+        let choices = body
+            .get("choices")
+            .and_then(|c| c.as_array())
+            .ok_or_else(|| {
+                AiError::ParseError(
+                    "Missing 'choices' array in Ollama response".to_string(),
+                )
+            })?;
+
+        if choices.is_empty() {
+            return Err(AiError::ParseError(
+                "Empty 'choices' array in Ollama response".to_string(),
+            ));
+        }
+
+        let content = choices[0]
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| {
+                AiError::ParseError(
+                    "Failed to extract message content from Ollama payload".to_string(),
+                )
+            })?;
 
         Ok(content.to_string())
     }
