@@ -75,6 +75,13 @@ export interface AiDecision {
     actions?: MixAction[];
     reasoning_tags?: string[];
     confidence?: number;
+    // Phase 34: Enhanced decision fields
+    entry_marker?: string;
+    exit_marker?: string;
+    creative_intensity?: number;
+    set_arc?: string;
+    planner_mode?: string;
+    template_scores?: [string, number][];
 }
 
 export interface PlaylistRecord {
@@ -120,13 +127,17 @@ export interface LibraryFilters {
 export interface AiDebugInfo {
     provider: string;
     model: string;
-    deck_a_playing: boolean;
-    deck_b_playing: boolean;
-    deck_a_position_ms: number;
-    deck_b_position_ms: number;
-    last_decision: any | null;
-    personality: string;
-    recent_templates: string[];
+    enabled: boolean;
+    has_api_key: boolean;
+    playing_deck: string;
+    position_ms: number;
+    duration_ms: number;
+    position_fraction: number;
+    master_bpm: number;
+    beat_number: number;
+    bar_number: number;
+    silence_frames: number;
+    crossfader: number;
 }
 
 interface DJStore {
@@ -146,6 +157,7 @@ interface DJStore {
     libraryFilters: LibraryFilters;
     aiConfig: {
         enabled: boolean;
+        provider: string;
         api_key: string;
         model: string;
         endpoint_url: string;
