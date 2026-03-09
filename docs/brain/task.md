@@ -573,7 +573,7 @@ Goal: Make the AI select tracks that match the current vibe and seek to the sect
 - [x] Expose `spectral_bass_energy`, `spectral_flatness`, `spectral_high_energy` in AI context
 - [x] Tests: 4 new tests — vibe scoring flow, awkward flow detection, missing data handling, multi-dimensional spectral
 
-## Phase 48: Track Recycling & Anthem Callbacks
+## Phase 48: Track Recycling & Anthem Callbacks ✅
 
 Goal: Allow the DJ to replay songs and bring back bangers. Currently `score_variety` hard-returns 0.0 for any recently played track.
 
@@ -586,17 +586,17 @@ Goal: Allow the DJ to replay songs and bring back bangers. Currently `score_vari
 - [x] Expose replay config in AI context for LLM awareness
 - [x] Tests: 3 new quality tests — replay severity conditional, excessive replay flagging, hard cap enforcement
 
-## Phase 49: Advanced Auto-Cueing & Mix Point Intelligence
+## Phase 49: Advanced Auto-Cueing & Mix Point Intelligence ✅
 
 Goal: Upgrade auto-cues from basic section markers (intro/drop/break/outro/first_beat) to intelligent mix points.
 
-- [ ] Add `detect_vocal_curve()` returning per-window vocal presence values (reuses existing FFT logic)
-- [ ] Add `detect_vocal_free_zones()` — consecutive windows with vocal energy < threshold for 4+ windows
-- [ ] Add `detect_impact_moments()` — energy curve derivative spikes (sudden energy jumps), deduplicated within 4 seconds
-- [ ] Add `compute_best_mix_points()` — best mix-in (vocal-free, low energy, phrase-aligned) and best mix-out (near outro, pre-decline, phrase-aligned)
-- [ ] Integrate into analysis pipeline after existing `generate_auto_cues`, append new cue types
-- [ ] New cue types: `best_mix_in`, `best_mix_out`, `vocal_free_start`, `vocal_free_end`, `impact`
-- [ ] Use in entry point selection: prefer `best_mix_in` cue, use `vocal_free_start` when outgoing has vocals, use `impact` for drop_swap/echo_drop
-- [ ] Add `best_mix_out` as transition window (score 0.9), vocal-free zones as windows (0.75), impacts as windows (0.55)
-- [ ] Tests: vocal-free detection, impact detection, mix-in prefers vocal-free, mix-out near outro
+- [x] Add `detect_vocal_curve()` returning per-window vocal presence values (reuses existing FFT logic)
+- [x] Add `detect_vocal_free_zones()` — consecutive windows with vocal energy < threshold for 4+ windows
+- [x] Add `detect_impact_moments()` — energy curve derivative spikes (sudden energy jumps), deduplicated within 4 seconds
+- [x] Add `compute_best_mix_points()` — best mix-in (vocal-free, low energy, phrase-aligned) and best mix-out (near outro, pre-decline, phrase-aligned)
+- [x] Integrate into analysis pipeline after existing `generate_auto_cues`, append new cue types
+- [x] New cue types: `best_mix_in`, `best_mix_out`, `vocal_free_start`, `vocal_free_end`, `impact`
+- [x] Use in entry point selection: prefer `best_mix_in` cue, use `vocal_free_start` when outgoing has vocals, use `impact` for drop_swap/echo_drop
+- [x] Add `best_mix_out` as transition window (score 0.9), vocal-free zones as windows (0.75), impacts as windows (0.55)
+- [x] Tests: vocal-free detection, impact detection, mix-in prefers vocal-free, mix-out near outro
 
