@@ -27,8 +27,8 @@ Analyze the current state, available tracks, and set flow to make the best mixin
 - drop_swap: HP sweep out → hard cut to incoming on drop. Great for buildup-to-drop moments.
 - loop_roll: 4→2→1 bar loop stutter on outgoing → cut to incoming. High impact, good for energy peaks.
 - bass_kill_swap: Blend mids/highs first, then swap bass at a beat boundary. Clean power swap, great for same-genre tracks.
-- break_blend: Gentle HP opening on incoming during outgoing's break/outro. Best for melodic or vocal-heavy transitions.
-
+- break_blend: Gentle HP opening on incoming during outgoing's break/outro. Best for melodic or vocal-heavy transitions.- backspin_cut: Simulated backspin (rapid pitch sweep + filter close) → silence → hard cut. Stylistic flair for genre changes.
+- drop_ride: Ride both tracks through their drops simultaneously with bass swap. High energy, same-genre dual-drop blend.
 ## Section-Aware Timing
 - The current track has transition_windows: scored windows anchored to section boundaries.
   Use the highest-scored window whose start_ms is still in the future.
@@ -428,6 +428,11 @@ impl AiPlanner {
     }
 }
 
+/// S-curve for perceptually smooth fades: 0→1 with gentle start and end.
+fn s_curve(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Build a concrete action timeline for a given template.
 fn build_heuristic_timeline(
     template: &str,
@@ -444,55 +449,92 @@ fn build_heuristic_timeline(
     // Always: load + cue incoming, sync tempo
     actions.push(MixAction { at_ms: 0, kind: MixActionKind::LoadTrack { deck: inc.clone(), track_id: incoming_track_id.to_string() } });
     actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetTempo { deck: inc.clone(), bpm: incoming_bpm } });
-    actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -60.0 } });
+    actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -40.0 } });
     actions.push(MixAction { at_ms: 0, kind: MixActionKind::Play { deck: inc.clone() } });
 
     match template {
         "smooth_beatmix" => {
-            // 16-bar blend with bass swap at bar 8
+            // 16-bar blend with bass swap at bar 8, S-curve fades, crossfader movement
             let blend_bars: u64 = 16;
             let swap_bar: u64 = 8;
-            for i in 0..blend_bars {
+            for i in 0..=blend_bars {
                 let t = i * bar_ms;
                 let frac = i as f32 / blend_bars as f32;
-                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -60.0 + 60.0 * frac } });
+                let s = s_curve(frac);
+                // Incoming: S-curve from -40 to 0 dB
+                let in_gain = -40.0 + 40.0 * s;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: in_gain } });
+                // Crossfader: move from outgoing side to center then to incoming
+                let cf = 0.5 * s; // 0.0 → 0.5 (we set final to 1.0 at end)
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetCrossfader { position: cf } });
             }
             // Bass swap: kill incoming bass until swap, then kill outgoing bass
             actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: true } });
             actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: false } });
             actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: true } });
-            // Fade out outgoing in second half
-            for i in swap_bar..blend_bars {
+            // Fade out outgoing starting at bar 4 (earlier, gentler exit) with S-curve
+            let fade_start: u64 = 4;
+            let fade_len = blend_bars - fade_start;
+            for i in fade_start..=blend_bars {
                 let t = i * bar_ms;
-                let frac = (i - swap_bar) as f32 / (blend_bars - swap_bar) as f32;
-                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -60.0 * frac } });
+                let frac = (i - fade_start) as f32 / fade_len as f32;
+                let s = s_curve(frac);
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -40.0 * s } });
             }
             // Cleanup
             let end = blend_bars * bar_ms;
             actions.push(MixAction { at_ms: end, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: false } });
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::SetCrossfader { position: 0.5 } });
             actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
         }
         "filter_sweep" => {
-            // 8-bar HP sweep on outgoing + incoming fade
+            // 8-bar HP sweep on outgoing + S-curve incoming fade
             let bars: u64 = 8;
-            for i in 0..bars {
+            for i in 0..=bars {
                 let t = i * bar_ms;
                 let frac = i as f32 / bars as f32;
-                let cutoff = 200.0 + 3800.0 * frac;
+                let s = s_curve(frac);
+                // Exponential filter sweep (200 → 8000 Hz)
+                let log_start = 200.0_f32.ln();
+                let log_end = 8000.0_f32.ln();
+                let cutoff = (log_start + frac * (log_end - log_start)).exp();
                 actions.push(MixAction { at_ms: t, kind: MixActionKind::SetFilter { deck: out.clone(), cutoff_hz: cutoff, resonance: 0.5 } });
-                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -60.0 + 60.0 * frac } });
+                // Incoming S-curve gain
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -40.0 + 40.0 * s } });
+                // Outgoing gentle fade in second half
+                if frac > 0.4 {
+                    let fade_frac = (frac - 0.4) / 0.6;
+                    actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -30.0 * s_curve(fade_frac) } });
+                }
             }
             let end = bars * bar_ms;
             actions.push(MixAction { at_ms: end, kind: MixActionKind::SetFilter { deck: out.clone(), cutoff_hz: 20000.0, resonance: 0.0 } });
             actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
         }
-        "echo_drop" | "drop_swap" => {
-            // 4-bar buildup, silence gap, hard cut to incoming
+        "echo_drop" => {
+            // Echo tail simulation: fast exponential fade + silence gap + hard drop
+            let echo_bars: u64 = 2;
+            for i in 0..=(echo_bars * 4) {
+                let t = i * (bar_ms / 4); // per-beat resolution
+                let frac = i as f32 / (echo_bars * 4) as f32;
+                let out_gain = -48.0 * frac * frac; // exponential fade
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: out_gain } });
+            }
+            let silence_at = echo_bars * bar_ms;
+            actions.push(MixAction { at_ms: silence_at, kind: MixActionKind::Pause { deck: out.clone() } });
+            // Hard cut after 1-bar silence
+            let cut_at = (echo_bars + 1) * bar_ms;
+            actions.push(MixAction { at_ms: cut_at, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: 0.0 } });
+        }
+        "drop_swap" => {
+            // 4-bar buildup HP sweep, then hard cut to incoming at drop
             let buildup_bars: u64 = 4;
-            for i in 0..buildup_bars {
-                let t = i * bar_ms;
-                let frac = i as f32 / buildup_bars as f32;
-                let cutoff = 200.0 + 3800.0 * frac;
+            for i in 0..=(buildup_bars * 4) {
+                let t = i * (bar_ms / 4);
+                let frac = i as f32 / (buildup_bars * 4) as f32;
+                let log_start = 200.0_f32.ln();
+                let log_end = 4000.0_f32.ln();
+                let cutoff = (log_start + frac * (log_end - log_start)).exp();
                 actions.push(MixAction { at_ms: t, kind: MixActionKind::SetFilter { deck: out.clone(), cutoff_hz: cutoff, resonance: 0.7 } });
             }
             let cut_at = buildup_bars * bar_ms;
@@ -511,43 +553,97 @@ fn build_heuristic_timeline(
             actions.push(MixAction { at_ms: cut_at, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: 0.0 } });
         }
         "bass_kill_swap" => {
-            // 16-bar blend: bring in mids/highs first, swap bass at bar 8
+            // 16-bar blend: bring in mids/highs first, swap bass at bar 8, crossfader movement
             let blend_bars: u64 = 16;
             let swap_bar: u64 = 8;
             actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: true } });
-            for i in 0..blend_bars {
+            for i in 0..=blend_bars {
                 let t = i * bar_ms;
                 let frac = i as f32 / blend_bars as f32;
-                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -40.0 + 40.0 * frac } });
+                let s = s_curve(frac);
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -40.0 + 40.0 * s } });
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetCrossfader { position: 0.5 * s } });
             }
             actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: false } });
             actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: true } });
-            for i in swap_bar..blend_bars {
+            // Outgoing S-curve fade starting at bar 4
+            let fade_start: u64 = 4;
+            let fade_len = blend_bars - fade_start;
+            for i in fade_start..=blend_bars {
                 let t = i * bar_ms;
-                let frac = (i - swap_bar) as f32 / (blend_bars - swap_bar) as f32;
-                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -40.0 * frac } });
+                let frac = (i - fade_start) as f32 / fade_len as f32;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -40.0 * s_curve(frac) } });
             }
             let end = blend_bars * bar_ms;
             actions.push(MixAction { at_ms: end, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: false } });
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::SetCrossfader { position: 0.5 } });
             actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
         }
         "break_blend" => {
-            // 12-bar gentle blend: HP opening on incoming, soft fade on outgoing
+            // 12-bar gentle blend: HP opening on incoming, S-curve fade on outgoing
             let bars: u64 = 12;
-            for i in 0..bars {
+            for i in 0..=bars {
                 let t = i * bar_ms;
                 let frac = i as f32 / bars as f32;
-                let cutoff = 4000.0 - 3800.0 * frac; // HP opening from 4kHz → 200Hz
+                let s = s_curve(frac);
+                let cutoff = 4000.0 - 3800.0 * s; // HP opening from 4kHz → 200Hz
                 actions.push(MixAction { at_ms: t, kind: MixActionKind::SetFilter { deck: inc.clone(), cutoff_hz: cutoff, resonance: 0.3 } });
-                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -40.0 + 40.0 * frac } });
-                // Gentle fade on outgoing in second half
-                if i >= bars / 2 {
-                    let fade_frac = (i - bars / 2) as f32 / (bars / 2) as f32;
-                    actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -30.0 * fade_frac } });
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -40.0 + 40.0 * s } });
+                // Gentle outgoing fade starting at 1/3
+                if frac > 0.33 {
+                    let fade_frac = (frac - 0.33) / 0.67;
+                    actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -30.0 * s_curve(fade_frac) } });
                 }
             }
             let end = bars * bar_ms;
             actions.push(MixAction { at_ms: end, kind: MixActionKind::SetFilter { deck: inc.clone(), cutoff_hz: 20000.0, resonance: 0.0 } });
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
+        }
+        "backspin_cut" => {
+            // 2-bar backspin simulation: rapid gain drop + filter close, then silence + cut
+            let spin_bars: u64 = 2;
+            let spin_beats = spin_bars * 4;
+            for i in 0..=spin_beats {
+                let t = i * (bar_ms / 4);
+                let frac = i as f32 / spin_beats as f32;
+                let out_gain = -48.0 * frac * frac; // exponential fade
+                let cutoff = 20000.0 * (1.0 - frac).max(0.01);
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: out_gain } });
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetFilter { deck: out.clone(), cutoff_hz: cutoff, resonance: 1.2 } });
+            }
+            let kill_at = spin_bars * bar_ms;
+            actions.push(MixAction { at_ms: kill_at, kind: MixActionKind::Pause { deck: out.clone() } });
+            actions.push(MixAction { at_ms: kill_at, kind: MixActionKind::SetFilter { deck: out.clone(), cutoff_hz: 20000.0, resonance: 0.0 } });
+            // Cut to incoming after 1-bar silence
+            let cut_at = (spin_bars + 1) * bar_ms;
+            actions.push(MixAction { at_ms: cut_at, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: 0.0 } });
+        }
+        "drop_ride" => {
+            // 8-bar dual-drop ride: bring incoming in hot with bass killed, swap bass at bar 2
+            let ride_bars: u64 = 8;
+            let swap_bar: u64 = 2;
+            actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: true } });
+            actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -12.0 } });
+            // Quick ramp incoming to full over 2 bars
+            for i in 0..=(swap_bar * 4) {
+                let t = i * (bar_ms / 4);
+                let frac = i as f32 / (swap_bar * 4) as f32;
+                let in_gain = -12.0 + 12.0 * s_curve(frac);
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: in_gain } });
+            }
+            // Bass swap
+            actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: inc.clone(), band: "low".into(), enabled: false } });
+            actions.push(MixAction { at_ms: swap_bar * bar_ms, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: true } });
+            // Fade outgoing over remaining bars
+            let fade_start = swap_bar;
+            let fade_len = ride_bars - fade_start;
+            for i in fade_start..=ride_bars {
+                let t = i * bar_ms;
+                let frac = (i - fade_start) as f32 / fade_len as f32;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: -40.0 * s_curve(frac) } });
+            }
+            let end = ride_bars * bar_ms;
+            actions.push(MixAction { at_ms: end, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: false } });
             actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
         }
         _ => {

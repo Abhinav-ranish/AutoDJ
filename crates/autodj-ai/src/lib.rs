@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiConfig {
     pub enabled: bool,
+    /// LLM provider: "gemini" or "groq"
+    #[serde(default = "default_provider")]
+    pub provider: String,
     pub model: String,
     pub api_key: Option<String>,
     pub endpoint_url: Option<String>,
@@ -32,10 +35,15 @@ pub struct AiConfig {
     pub weight_spectral: f64,
 }
 
+fn default_provider() -> String {
+    "gemini".to_string()
+}
+
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            provider: "gemini".to_string(),
             model: "gemini-2.5-flash".to_string(),
             api_key: None,
             endpoint_url: None,
