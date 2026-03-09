@@ -260,27 +260,134 @@ impl AiPlanner {
         };
         let bpm_diff = (current_profile.tempo.bpm - next_track.tempo.bpm).abs();
 
-        let (template_name, reasoning_tags) = if energy_jump > 0.3 {
-            // Big energy jump → dramatic transition
-            if bpm_diff > 10.0 {
-                ("loop_roll", vec!["high_energy_jump", "tempo_mismatch", "loop_roll"])
+        // Section proximity: check which section we're transitioning from
+        let near_drop = best_window.map(|w| w.anchor.contains("drop")).unwrap_or(false);
+        let near_breakdown = best_window.map(|w| {
+            w.anchor.contains("break") || w.anchor.contains("breakdown")
+        }).unwrap_or(false);
+        let near_outro = best_window.map(|w| w.anchor.contains("outro")).unwrap_or(false);
+
+        // Energy trajectory
+        let trajectory_building = current_profile.energy_trajectory.as_deref() == Some("building");
+        let trajectory_declining = current_profile.energy_trajectory.as_deref() == Some("declining");
+
+        // Rhythm profile
+        let high_complexity = current_profile.rhythm.as_ref()
+            .map(|r| r.complexity > 0.7).unwrap_or(false);
+        let high_danceability = current_profile.rhythm.as_ref()
+            .map(|r| r.danceability > 0.7).unwrap_or(false);
+
+        // Incoming track has a strong drop we can ride into
+        let incoming_has_drop = next_track.first_drop_ms.is_some();
+
+        // ── Score each template and pick best ────────────────────────────────
+        let mut candidates: Vec<(&str, f64, Vec<&str>)> = Vec::new();
+
+        // SmoothBeatmix: safe default, best for same-genre similar-energy
+        {
+            let mut score = 0.5; // base score (no longer the overwhelming default)
+            if !genre_change && energy_jump.abs() < 0.15 { score += 0.2; }
+            if near_outro { score += 0.1; }
+            if bpm_diff < 4.0 { score += 0.1; }
+            if vocal_overlap { score -= 0.3; } // bad for vocal overlap
+            candidates.push(("smooth_beatmix", score, vec!["compatible", "smooth_beatmix"]));
+        }
+
+        // FilterSweep: good for energy builds, genre changes, building trajectory
+        {
+            let mut score = 0.3;
+            if trajectory_building { score += 0.3; }
+            if genre_change { score += 0.25; }
+            if energy_jump > 0.1 { score += 0.2; }
+            if near_breakdown { score += 0.15; }
+            candidates.push(("filter_sweep", score, vec!["filter_sweep"]));
+        }
+
+        // DropSwap: dramatic, for drop proximity or big energy jumps
+        {
+            let mut score = 0.2;
+            if near_drop { score += 0.4; }
+            if energy_jump > 0.2 { score += 0.25; }
+            if trajectory_building && incoming_has_drop { score += 0.2; }
+            if bpm_diff > 10.0 { score -= 0.2; } // hard cuts need tempo alignment
+            candidates.push(("drop_swap", score, vec!["drop_swap"]));
+        }
+
+        // EchoDrop: big drama moments, large tempo/genre jumps
+        {
+            let mut score = 0.15;
+            if energy_jump > 0.3 { score += 0.3; }
+            if bpm_diff > 10.0 { score += 0.25; }
+            if genre_change && energy_jump.abs() > 0.2 { score += 0.2; }
+            candidates.push(("echo_drop", score, vec!["echo_drop"]));
+        }
+
+        // LoopRoll: high impact, works with complex rhythms at peak energy
+        {
+            let mut score = 0.15;
+            if high_complexity { score += 0.3; }
+            if energy_jump > 0.25 { score += 0.2; }
+            if bpm_diff > 8.0 { score += 0.15; }
+            if near_drop { score += 0.1; }
+            candidates.push(("loop_roll", score, vec!["loop_roll"]));
+        }
+
+        // BassKillSwap: clean power swap, same genre, groovy tracks
+        {
+            let mut score = 0.3;
+            if !genre_change { score += 0.15; }
+            if high_danceability { score += 0.2; }
+            if energy_jump.abs() < 0.15 { score += 0.15; }
+            if near_outro { score += 0.1; }
+            if vocal_overlap { score -= 0.2; }
+            candidates.push(("bass_kill_swap", score, vec!["bass_kill_swap"]));
+        }
+
+        // BreakBlend: gentle, vocal-friendly, low energy or declining
+        {
+            let mut score = 0.25;
+            if vocal_overlap { score += 0.4; }
+            if trajectory_declining { score += 0.25; }
+            if energy_jump < -0.15 { score += 0.2; }
+            if near_breakdown { score += 0.15; }
+            candidates.push(("break_blend", score, vec!["break_blend"]));
+        }
+
+        // BackspinCut: stylistic flair, genre changes, moderate energy
+        {
+            let mut score = 0.1;
+            if genre_change { score += 0.25; }
+            if energy_jump.abs() > 0.15 && energy_jump.abs() < 0.35 { score += 0.2; }
+            if !near_drop && !near_breakdown { score += 0.1; } // works anywhere
+            candidates.push(("backspin_cut", score, vec!["backspin_cut"]));
+        }
+
+        // DropRide: ride both drops simultaneously, high energy
+        {
+            let mut score = 0.1;
+            if incoming_has_drop && near_drop { score += 0.35; }
+            if energy_jump.abs() < 0.2 { score += 0.15; }
+            if !genre_change { score += 0.1; }
+            if high_danceability { score += 0.1; }
+            candidates.push(("drop_ride", score, vec!["drop_ride"]));
+        }
+
+        // Sort descending by score
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Add variety: if top 2 scores are within 0.1, randomly pick between them
+        // using a simple deterministic "random" based on elapsed time
+        let (template_name, _, reasoning_tags) = if candidates.len() >= 2
+            && (candidates[0].1 - candidates[1].1) < 0.1
+        {
+            // Use elapsed_ms as a simple entropy source to alternate picks
+            if context.current_state.elapsed_ms % 2 == 0 {
+                candidates.remove(1)
             } else {
-                ("drop_swap", vec!["high_energy_jump", "drop_swap"])
+                candidates.remove(0)
             }
-        } else if vocal_overlap {
-            // Vocal overlap → gentle filtered blend
-            ("break_blend", vec!["vocal_overlap", "break_blend"])
-        } else if genre_change {
-            if energy_jump.abs() < 0.15 {
-                ("bass_kill_swap", vec!["genre_change", "similar_energy", "bass_kill_swap"])
-            } else {
-                ("filter_sweep", vec!["genre_change", "filter_sweep"])
-            }
-        } else if energy_jump < -0.2 {
-            ("break_blend", vec!["energy_drop", "break_blend"])
         } else {
-            // Default: same genre, similar energy → clean beat-matched blend
-            ("smooth_beatmix", vec!["compatible", "smooth_beatmix"])
+            candidates.remove(0)
         };
 
         // ── Build action timeline ────────────────────────────────────────────

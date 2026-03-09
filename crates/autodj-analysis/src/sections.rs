@@ -129,7 +129,7 @@ fn find_sustained_rise(curve: &[f64], threshold: f64, sustain: usize) -> Option<
         if val >= threshold {
             count += 1;
             if count >= sustain {
-                return Some(i - sustain + 1);
+                return Some(i + 1 - sustain);
             }
         } else {
             count = 0;
