@@ -75,7 +75,7 @@ impl AppState {
             engine_sender: Mutex::new(engine.command_sender),
             engine_receiver: Mutex::new(engine.state_receiver),
             track_loader: Mutex::new(loader),
-            ai_planner: tokio::sync::RwLock::new(AiPlanner::new(AiConfig::default())),
+            ai_planner: tokio::sync::RwLock::new(AiPlanner::new(ai_config_from_env())),
             dj_mode: std::sync::RwLock::new(DjMode::Manual),
             current_session_id: std::sync::RwLock::new(None),
             recording_flag,
@@ -116,9 +116,37 @@ impl AppState {
 }
 
 /// Get the data directory (~/.autodj).
-/// Get the data directory (~/.autodj or %APPDATA%\autodj).
 fn dirs_data_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join(".autodj")
+}
+
+/// Build an AiConfig from environment variables (AI_PROVIDER, GEMINI_API_KEY, GROQ_API_KEY).
+fn ai_config_from_env() -> AiConfig {
+    let provider = std::env::var("AI_PROVIDER")
+        .unwrap_or_else(|_| "gemini".to_string())
+        .to_lowercase();
+
+    let (api_key, model, endpoint) = match provider.as_str() {
+        "groq" => (
+            std::env::var("GROQ_API_KEY").ok().filter(|k| !k.is_empty() && !k.starts_with("gsk_...")),
+            "llama-3.3-70b-versatile".to_string(),
+            Some("https://api.groq.com/openai/v1".to_string()),
+        ),
+        _ => (
+            std::env::var("GEMINI_API_KEY").ok().filter(|k| !k.is_empty() && !k.starts_with("AIzaSy...")),
+            "gemini-2.5-flash".to_string(),
+            Some("https://generativelanguage.googleapis.com/v1beta/models".to_string()),
+        ),
+    };
+
+    AiConfig {
+        enabled: api_key.is_some(),
+        provider,
+        model,
+        api_key,
+        endpoint_url: endpoint,
+        ..AiConfig::default()
+    }
 }

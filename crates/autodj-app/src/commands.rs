@@ -905,3 +905,93 @@ pub fn get_audio_devices() -> Result<Vec<String>, String> {
     Ok(names)
 }
 
+// ─── Playlists ──────────────────────────────────────────────
+
+/// Create a new playlist.
+#[tauri::command]
+pub fn create_playlist(name: String, description: Option<String>, state: State<'_, AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.create_playlist(&name, description.as_deref()).map_err(|e| format!("DB: {e}"))
+}
+
+/// Get all playlists.
+#[tauri::command]
+pub fn get_playlists(state: State<'_, AppState>) -> Result<Vec<autodj_storage::db::PlaylistRecord>, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.get_all_playlists().map_err(|e| format!("DB: {e}"))
+}
+
+/// Rename a playlist.
+#[tauri::command]
+pub fn rename_playlist(playlist_id: String, name: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.rename_playlist(&playlist_id, &name).map_err(|e| format!("DB: {e}"))
+}
+
+/// Delete a playlist.
+#[tauri::command]
+pub fn delete_playlist(playlist_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.delete_playlist(&playlist_id).map_err(|e| format!("DB: {e}"))
+}
+
+/// Add a track to a playlist.
+#[tauri::command]
+pub fn add_track_to_playlist(playlist_id: String, track_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.add_track_to_playlist(&playlist_id, &track_id).map_err(|e| format!("DB: {e}"))
+}
+
+/// Remove a track from a playlist.
+#[tauri::command]
+pub fn remove_track_from_playlist(playlist_id: String, track_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.remove_track_from_playlist(&playlist_id, &track_id).map_err(|e| format!("DB: {e}"))
+}
+
+/// Reorder tracks in a playlist.
+#[tauri::command]
+pub fn reorder_playlist(playlist_id: String, track_ids: Vec<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.reorder_playlist(&playlist_id, &track_ids).map_err(|e| format!("DB: {e}"))
+}
+
+/// Get tracks in a playlist.
+#[tauri::command]
+pub fn get_playlist_tracks(playlist_id: String, state: State<'_, AppState>) -> Result<Vec<TrackRecord>, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.get_playlist_tracks(&playlist_id).map_err(|e| format!("DB: {e}"))
+}
+
+/// Get all sessions for cue sheet export.
+#[tauri::command]
+pub fn get_sessions(state: State<'_, AppState>) -> Result<Vec<autodj_storage::db::SessionRecord>, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.get_all_sessions().map_err(|e| format!("DB: {e}"))
+}
+
+/// Export a session as a cue sheet string.
+#[tauri::command]
+pub fn export_cue_sheet(session_id: String, state: State<'_, AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    let entries = db.get_session_mix_history(&session_id).map_err(|e| format!("DB: {e}"))?;
+    if entries.is_empty() {
+        return Err("No mix history for this session".to_string());
+    }
+    let session_start = entries.first().map(|e| e.started_at).unwrap_or(0);
+    let mut lines = Vec::new();
+    lines.push("# AutoDJ Set — Cue Sheet".to_string());
+    lines.push(String::new());
+    for (i, entry) in entries.iter().enumerate() {
+        let offset_secs = (entry.started_at - session_start).max(0);
+        let mins = offset_secs / 60;
+        let secs = offset_secs % 60;
+        let artist = entry.artist.as_deref().unwrap_or("Unknown");
+        let title = entry.title.as_deref().unwrap_or("Unknown");
+        let transition = entry.transition_type.as_deref().unwrap_or("");
+        let trans_str = if transition.is_empty() { String::new() } else { format!(" [{}]", transition) };
+        lines.push(format!("{:02}. [{:02}:{:02}] {} — {}{}", i + 1, mins, secs, artist, title, trans_str));
+    }
+    Ok(lines.join("\n"))
+}
+

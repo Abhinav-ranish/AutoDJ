@@ -67,6 +67,16 @@ pub fn run() {
             commands::set_preference,
             commands::get_all_preferences,
             commands::get_audio_devices,
+            commands::create_playlist,
+            commands::get_playlists,
+            commands::rename_playlist,
+            commands::delete_playlist,
+            commands::add_track_to_playlist,
+            commands::remove_track_from_playlist,
+            commands::reorder_playlist,
+            commands::get_playlist_tracks,
+            commands::get_sessions,
+            commands::export_cue_sheet,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
