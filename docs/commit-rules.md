@@ -40,4 +40,4 @@ Every commit message must follow this structure:
 
 ## 4. Documentation Compliance
 - When completing a phase, always update `docs/brain/task.md` in the same commit or a follow-up `docs(brain)` commit.
-- Keep `walkthrough.md` updated with proof of work and design decisions.
+- Do not touch coding files unless explicitly requested.

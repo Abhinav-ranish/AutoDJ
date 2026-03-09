@@ -329,31 +329,31 @@ Goal: AI doesn’t touch EQ because it has too few “safe” knobs + no structu
 
 Goal: Fix the AI's heavy bias toward `smooth_beatmix` and improve fade-in/fade-out quality across all transitions. Make the heuristic planner section-aware, drop-aware, and capable of selecting the full template palette.
 
-* [ ] **Fix template selection bias in heuristic planner**
-  * [ ] Use section proximity (near drop → `drop_swap`; near breakdown → `break_blend`/`filter_sweep`)
-  * [ ] Use energy trajectory: "building" → `filter_sweep`/`drop_swap`; "declining" → `break_blend`
-  * [ ] Use rhythm complexity/danceability: high complexity → `loop_roll`; groovy → `bass_kill_swap`
-  * [ ] Add randomized variety: when multiple templates score similarly, pick randomly instead of defaulting
-  * [ ] Lower the energy thresholds so more tracks trigger non-default templates
+* [x] **Fix template selection bias in heuristic planner**
+  * [x] Use section proximity (near drop → `drop_swap`; near breakdown → `break_blend`/`filter_sweep`)
+  * [x] Use energy trajectory: "building" → `filter_sweep`/`drop_swap`; "declining" → `break_blend`
+  * [x] Use rhythm complexity/danceability: high complexity → `loop_roll`; groovy → `bass_kill_swap`
+  * [x] Add randomized variety: when multiple templates score similarly, pick randomly instead of defaulting
+  * [x] Lower the energy thresholds so more tracks trigger non-default templates
 
-* [ ] **Improve fade curves in action timelines**
-  * [ ] Replace linear dB ramps with equal-power / S-curve crossfades (perceptually smooth)
-  * [ ] Start incoming gain at -40 dB (audible sooner) instead of -60 dB (inaudible for most of ramp)
-  * [ ] Add crossfader movement to `smooth_beatmix` and `bass_kill_swap` timelines
-  * [ ] Outgoing fade starts earlier (bar 4 of 16 instead of bar 8) for longer, gentler exit
-  * [ ] Add gain compensation: slight boost at crossover point to prevent volume dip
+* [x] **Improve fade curves in action timelines**
+  * [x] Replace linear dB ramps with equal-power / S-curve crossfades (perceptually smooth)
+  * [x] Start incoming gain at -40 dB (audible sooner) instead of -60 dB (inaudible for most of ramp)
+  * [x] Add crossfader movement to `smooth_beatmix` and `bass_kill_swap` timelines
+  * [x] Outgoing fade starts earlier (bar 4 of 16 instead of bar 8) for longer, gentler exit
+  * [x] Add gain compensation: slight boost at crossover point to prevent volume dip
 
-* [ ] **New transition template: `BackspinCut`**
-  * [ ] Simulated backspin: rapid pitch sweep down on outgoing → silence → hard cut to incoming
-  * [ ] Timeline: ramp outgoing gain down with filter sweep over 2 bars, then cut
+* [x] **New transition template: `BackspinCut`**
+  * [x] Simulated backspin: rapid pitch sweep down on outgoing → silence → hard cut to incoming
+  * [x] Timeline: ramp outgoing gain down with filter sweep over 2 bars, then cut
 
-* [ ] **New transition template: `DropRide`**
-  * [ ] Blend incoming track starting from its drop cue, riding both drops simultaneously
-  * [ ] Timeline: bass-swap during dual-drop, outgoing fades over 8 bars
+* [x] **New transition template: `DropRide`**
+  * [x] Blend incoming track starting from its drop cue, riding both drops simultaneously
+  * [x] Timeline: bass-swap during dual-drop, outgoing fades over 8 bars
 
-* [ ] **Section-aware template scoring function**
-  * [ ] Score each template against current section context and pick the best fit
-  * [ ] Factor in: section proximity, energy delta, genre change, vocal overlap, rhythm profile
+* [x] **Section-aware template scoring function**
+  * [x] Score each template against current section context and pick the best fit
+  * [x] Factor in: section proximity, energy delta, genre change, vocal overlap, rhythm profile
 
 ---
 
@@ -363,14 +363,14 @@ Goal: Fix the AI's heavy bias toward `smooth_beatmix` and improve fade-in/fade-o
 - [ ] Spectrum analyzer visualization (FFT-based, per-deck or master)
 - [ ] BPM confidence indicator in UI (show when detection is uncertain)
 
-## Phase 27: Playlist & Set Management
+## Phase 28: Playlist & Set Management
 - [ ] Create/save/delete playlists (tagged track collections)
 - [ ] Drag-and-drop reorder tracks within playlist
 - [ ] Load playlist into AutoDJ queue (play in order or shuffle)
 - [ ] Export set as cue sheet (tracklist with timestamps)
 - [ ] "Prepare set" mode — manually order tracks, preview transitions
 
-## Phase 28: Final Polish & Export
+## Phase 29: Final Polish & Export
 - [ ] FLAC/MP3 export option (in addition to WAV)
 - [ ] Normalize exported mix (LUFS target)
 - [ ] CPU profiling + optimization pass on audio callback
