@@ -1,36 +1,69 @@
 # AutoDJ Project Handoff
 
 ## Project State
-**AutoDJ** is a high-performance DJ application built with a memory-safe **Rust** audio engine and backend, coupled with a fast **TypeScript/React** frontend via **Tauri v2**. The core audio engine, UI, track analysis pipeline, AI DJ Conductor, and all enrichment phases are fully implemented and functional through Phase 17.
+**AutoDJ** is a high-performance DJ application built with a memory-safe **Rust** audio engine and backend, coupled with a fast **TypeScript/React** frontend via **Tauri v2**. The core audio engine, UI, track analysis pipeline, AI DJ Conductor, all enrichment phases, autonomous mixing loop, DJ-style live mixing with AI performance controls, library management, settings persistence, visual polish, batch operations, and safety monitoring are fully implemented and functional through Phase 25.
 
 ## Current Position
-- **Phases 1–17**: Complete
+- **Phases 1–25**: Complete
 - **AI Enrichment Overhaul (Phases 12–17)**: All done
-- **61 tests passing**, zero warnings
+- **Autonomous Mixing & AI Controls (Phases 18–20)**: All done
+- **Library, Settings, Polish, Safety (Phases 21–25)**: All done
+- **65 tests passing**, zero warnings, TypeScript compiles clean
 
-## Recent Accomplishments (Latest Session — Phases 14–17)
+## Recent Accomplishments (Latest Session — Phases 21–25)
 
-### Phase 14: AI Decision Engine Overhaul
-- **7-weight heuristic scorer** (`scorer.rs`): tempo, key, energy, variety, genre, mood, spectral. Added `ScoringCandidate` struct, genre family groups (10 families), mood adjacency wheel.
-- **Enriched AI context** (`context.rs`): genre/mood/vibe, vocal_presence, energy_trajectory, intro/outro/drop timestamps, set flow tracking.
-- **Section-aware transitions**: Uses outro_length_ms for optimal transition timing.
-- **Vocal-aware template selection**: Avoids vocal overlap, uses filter_sweep for genre changes.
-- **Fixed AiConfig model** from "gpt-4o-mini" to "gemini-2.5-flash".
+### Phase 21: Library Search, Sort & Filter
+- SQL-backed text search on title/artist via `search_tracks` command
+- BPM range, key, genre, mood filter support
+- Column-header click-to-sort (toggles ASC/DESC) for all major columns
+- Search bar + filter pills UI in library toolbar with clear filters button
 
-### Phase 15: Mix History & Session Tracking
-- **DB methods**: `get_all_classifications`, `create_session`, `end_session`, `record_track_play`, `get_recent_track_ids`.
-- **Auto-session**: Session created on first `load_track`, track plays recorded automatically.
-- **Mix history**: AI decisions recorded in mix_history for feedback loop.
+### Phase 22: Preferences & Settings Persistence
+- `get_preference()`/`set_preference()` DB methods for key-value storage
+- AI config persisted to SQL preferences (with localStorage migration fallback)
+- Audio device enumeration via `cpal` + `get_audio_devices` command
+- `SettingsPanel` component with 3 tabs (AI, Audio, AutoDJ)
+- Preferences auto-restored on app launch via `initStore`
 
-### Phase 16: Audio Export
-- **WAV Recorder** (`recorder.rs`): Lock-free ring buffer capture from audio callback, writer thread drains to 32-bit float WAV file.
-- **Tauri commands**: `start_recording(filename)`, `stop_recording()`.
-- **UI**: Recording button with blinking red dot + elapsed time counter.
+### Phase 23: Visual Polish & UX
+- Album art display in deck headers (36x36 thumbnail via `convertFileSrc`)
+- 4 color-coded hot cue buttons (set/jump, red/green/blue/yellow)
+- Right-click context menu on library rows (Load to A/B, Re-analyze, Classify)
 
-### Phase 17: Visual Polish & Analysis
-- **Album art extraction**: Lofty extracts cover art during import, saved to `~/.autodj/cache/art/`.
-- **Energy-based sections**: Replaced 15% heuristic with energy curve analysis detecting intro/buildup/drop/breakdown/outro.
-- **Library UI**: Genre badges (purple) + mood badges (orange), 9-column grid layout.
+### Phase 24: Batch Operations & AI Polish
+- "Classify All" button for batch classification of unanalyzed tracks
+- Sequential processing with progress indicator ("Classifying X/Y")
+- Smart skip of already-classified and unanalyzed tracks
+
+### Phase 25: Safety & Reliability
+- RMS-based silence detection in audio callback (~30Hz, ~-80 dB threshold)
+- Emergency recovery: 90 consecutive silence frames (~3s) → auto-load next track
+- `master_rms`, `silence_frames`, `underrun_count` in engine snapshots
+- AutoDJ controller monitors silence for autonomous recovery
+
+## Previous Accomplishments (Phases 19–20)
+
+### Phase 19: DJ-Style Live Mixing + Phrase/Section-Aware Transitions
+- **Section-aware transition windows** (`sections.rs`): `generate_transition_windows()` computes safe mix windows from energy-based section markers (intro/outro/drop/break). `TransitionWindow` struct with anchor, start/end ms, and score.
+- **Phrase alignment** (`sections.rs`): `build_phrase_grid()` derives 8-bar phrase boundaries from beat grid. `next_phrase_boundary()` snaps transition timing to musical phrases.
+- **Auto-cue system** (`sections.rs` + `db.rs`): `generate_auto_cues()` produces canonical markers (CUE_INTRO, CUE_DROP, CUE_BREAK, CUE_OUTRO, CUE_FIRST_BEAT). New `auto_cues` DB table with save/get methods.
+- **4 new transition templates** (`transition.rs`): `DropSwap` (HP sweep → hard cut on drop), `LoopRoll` (4→2→1 bar stutter), `BassKillSwap` (mids/highs first, bass swap), `BreakBlend` (gentle HP + quadratic fade avoiding vocals). Total: 7 templates.
+- **AutoDJ controller overhaul** (`App.tsx`): State machine expanded to `idle → monitoring → planning → loading → aligning → transitioning`. Section-aware windowed triggers replace simple 75% position check. Phrase boundary alignment with polling (100ms interval, 15s timeout). Emergency fallback preserved.
+- **Pipeline integration** (`pipeline.rs`): Transition windows, phrases, and auto-cues generated during analysis and stored in `TrackProfile`.
+
+### Phase 20: AI Performance Controls — EQ/Filter Automation + Decision Schema v2
+- **EQ isolator mode** (`eq.rs`): LR4 cascade filters for steep isolator slopes. Per-band kill switches (`kill_low`, `kill_mid`, `kill_high`). `set_kill()` and `set_isolator_mode()` methods.
+- **New engine commands** (`command.rs` + `engine.rs`): `SetEqKill(deck, band, enabled)`, `SetEqMode(deck, Classic|Isolator)`, `SeekMs(deck, position)`. DeckSnapshot extended with `eq_kill_low/mid/high` + `eq_isolator` fields.
+- **AI Decision schema v2** (`planner.rs`): `MixAction` struct with `at_ms` + `MixActionKind` enum (12 types: LoadTrack, SetTempo, SetGain, SetFilter, SetEqBand, SetEqKill, SetLoop, ClearLoop, SetCrossfader, Play, Pause, ExecuteTemplate). AiDecision now includes `actions`, `reasoning_tags`, `confidence`.
+- **Heuristic timeline generation** (`planner.rs`): `build_heuristic_timeline()` generates full action sequences for each template type. Section-aware timing via transition windows + phrase snap. Improved template selection: vocal overlap → break_blend, energy jump → drop_swap/loop_roll, genre change → bass_kill_swap.
+- **Expanded system prompt** (`planner.rs`): Describes all 7 templates, section-aware timing rules, action timeline v2 format, and safety constraints for LLM.
+- **Context enrichment** (`context.rs`): `CurrentStateContext` now includes `transition_windows` and `auto_cues`. `TrackProfileShort` includes `auto_cues`.
+- **User feedback** (`db.rs`): `transition_feedback` table (session_id, from/to track, template, rating, notes, decision_json). `save_transition_feedback()` method.
+- **5 new Tauri commands** (`commands.rs` + `lib.rs`): `set_eq_kill`, `set_eq_mode`, `seek_ms`, `get_auto_cues`, `submit_transition_feedback`.
+- **UI updates** (`App.tsx` + `store.ts`): EQ kill buttons wired to `setEqKill`. AI panel shows reasoning tags, confidence badge, action timeline preview (first 6 actions). All 7 templates in transition dropdown. Store updated with `MixAction` interface and 5 new actions.
+
+### Phase 18: Autonomous AutoDJ Loop (previous session)
+- Position-aware controller, auto-classify on analysis, auto-pick first track, intelligent transition at 75%/outro, emergency fallback at 92%, continuous deck chaining.
 
 ## Core Features Implemented (Phases 1–10)
 - **Low-Latency Audio Engine**: `cpal`-based with `SPSC` lock-free command queues, 3-band EQ, SVF filters, and seamless loops.
@@ -50,10 +83,16 @@
 | `autodj-app` | Tauri commands, app state, main entrypoint |
 
 ## Known Gaps (Future Work)
-- `beats.rs` — synthetic grid only, no DP tracker
-- Album art display in deck panels — extracted but not shown in deck UI
+- `beats.rs` — synthetic grid only, no DP tracker (Phase 26 will address)
 - Recording limited to one session per app launch
-- Batch classification pipeline (per-track available but no bulk UI)
+- `BackspinExit` transition template (style-gated, deferred)
+- 4-band EQ mode + per-deck EQ presets
+- AI action rate limiting (>N actions per 8 bars)
+- Preference bias from feedback in scorer
+- Live AI overlay on deck UI + "Lock controls" toggles
+- Waveform hot cue markers, mix history view, responsive layout
+- Inline edit for AI classifications, energy arc goal parameter
+- End-of-track detection by audio signal, crash-safe session recovery
 - MIDI controller support
 - Key shift / harmonic pitch lock
 
@@ -64,7 +103,8 @@
 - **Config**: Create `.env` from `.env.example` in the root providing `GEMINI_API_KEY`.
 
 ## Key Documentation
-- `docs/brain/task.md` — Master task checklist (Phases 1–17)
+- `docs/brain/task.md` — Master task checklist (Phases 1–25 complete, 26–28 planned)
 - `docs/brain/gaps.md` — Known bugs, gaps, and recommendations
 - `docs/brain/implementation_plan.md` — Historical plan for Phases 5–9
+- `docs/brain/walkthrough.md` — Git history + phase implementation walkthrough
 - `docs/plans/2026-03-07-ai-enrichment-*.md` — Plans for Phases 12–17

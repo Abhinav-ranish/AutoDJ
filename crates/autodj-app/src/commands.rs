@@ -112,11 +112,36 @@ pub async fn import_files(
     Ok(imported_ids)
 }
 
-/// Get all tracks in the library.
+/// Get tracks with optional search, filter, and sort.
 #[tauri::command]
-pub fn get_tracks(state: State<'_, AppState>) -> Result<Vec<TrackRecord>, String> {
+pub fn get_tracks(
+    query: Option<String>,
+    genre: Option<String>,
+    mood: Option<String>,
+    bpm_min: Option<f64>,
+    bpm_max: Option<f64>,
+    key_filter: Option<String>,
+    sort_by: Option<String>,
+    sort_order: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<TrackRecord>, String> {
     let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-    db.get_all_tracks().map_err(|e| format!("DB: {e}"))
+
+    // If no filters applied, use the fast path
+    if query.is_none() && genre.is_none() && mood.is_none() && bpm_min.is_none() && bpm_max.is_none() && key_filter.is_none() && sort_by.is_none() {
+        return db.get_all_tracks().map_err(|e| format!("DB: {e}"));
+    }
+
+    db.search_tracks(
+        query.as_deref(),
+        genre.as_deref(),
+        mood.as_deref(),
+        bpm_min,
+        bpm_max,
+        key_filter.as_deref(),
+        sort_by.as_deref(),
+        sort_order.as_deref(),
+    ).map_err(|e| format!("DB: {e}"))
 }
 
 /// Load a track onto a deck.
@@ -842,5 +867,41 @@ pub fn submit_transition_feedback(
         notes.as_deref(),
         decision_json.as_deref(),
     ).map_err(|e| format!("DB error: {e}"))
+}
+
+// ─── Preferences ──────────────────────────────────────────────
+
+/// Get a preference value.
+#[tauri::command]
+pub fn get_preference(key: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.get_preference(&key).map_err(|e| format!("DB: {e}"))
+}
+
+/// Set a preference value.
+#[tauri::command]
+pub fn set_preference(key: String, value: String, state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.set_preference(&key, &value).map_err(|e| format!("DB: {e}"))
+}
+
+/// Get all preferences.
+#[tauri::command]
+pub fn get_all_preferences(state: State<'_, AppState>) -> Result<Vec<(String, String)>, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.get_all_preferences().map_err(|e| format!("DB: {e}"))
+}
+
+/// List available audio output devices.
+#[tauri::command]
+pub fn get_audio_devices() -> Result<Vec<String>, String> {
+    use cpal::traits::{HostTrait, DeviceTrait};
+    let host = cpal::default_host();
+    let devices = host.output_devices()
+        .map_err(|e| format!("Failed to enumerate devices: {e}"))?;
+    let names: Vec<String> = devices
+        .filter_map(|d| d.name().ok())
+        .collect();
+    Ok(names)
 }
 

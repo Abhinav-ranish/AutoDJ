@@ -63,6 +63,10 @@ pub fn run() {
             commands::seek_ms,
             commands::get_auto_cues,
             commands::submit_transition_feedback,
+            commands::get_preference,
+            commands::set_preference,
+            commands::get_all_preferences,
+            commands::get_audio_devices,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

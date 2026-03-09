@@ -288,42 +288,42 @@ Goal: AI doesn’t touch EQ because it has too few “safe” knobs + no structu
 ---
 
 
-## Phase 21: Library Search, Sort & Filter
-- [ ] SQL-backed text search (title, artist) via `search_tracks` command
-- [ ] BPM range filter, key filter, genre/mood filter
-- [ ] Column-header click-to-sort (title, artist, BPM, key, genre, duration)
-- [ ] UI: search bar above library + filter pills/dropdowns
-- [ ] Clear filters / show all button
+## Phase 21: Library Search, Sort & Filter ✅
+- [x] SQL-backed text search (title, artist) via `search_tracks` command
+- [x] BPM range filter, key filter, genre/mood filter
+- [x] Column-header click-to-sort (title, artist, BPM, key, genre, duration)
+- [x] UI: search bar above library + filter pills/dropdowns
+- [x] Clear filters / show all button
 
-## Phase 22: Preferences & Settings Persistence
-- [ ] Implement `get_preference()` / `set_preference()` DB methods
-- [ ] Persist AI config (API key, model) to SQL preferences table
-- [ ] Audio device enumeration (`cpal` host devices) + `get_audio_devices` command
-- [ ] Audio device selection + `set_audio_device` command (hot-swap output)
-- [ ] UI: settings panel with audio device picker, transition defaults, AutoDJ thresholds
-- [ ] Save/restore user preferences on app launch
+## Phase 22: Preferences & Settings Persistence ✅
+- [x] Implement `get_preference()` / `set_preference()` DB methods
+- [x] Persist AI config (API key, model) to SQL preferences table
+- [x] Audio device enumeration (`cpal` host devices) + `get_audio_devices` command
+- [x] Audio device selection + `set_audio_device` command (hot-swap output)
+- [x] UI: settings panel with audio device picker, transition defaults, AutoDJ thresholds
+- [x] Save/restore user preferences on app launch
 
-## Phase 23: Visual Polish & UX
-- [ ] Album art display in deck panels (use cached art from `get_album_art`)
-- [ ] Hot cue buttons in deck UI (set/jump/clear, color-coded)
-- [ ] Waveform hot cue markers (vertical lines at cue positions)
-- [ ] Mix history view — browse past sessions with tracklist + transitions
-- [ ] Right-click context menu on library rows (load to A/B, classify, delete)
-- [ ] Responsive layout improvements (smaller screens, collapsible panels)
+## Phase 23: Visual Polish & UX ✅
+- [x] Album art display in deck panels (use cached art from `get_album_art`)
+- [x] Hot cue buttons in deck UI (set/jump/clear, color-coded)
+- [ ] Waveform hot cue markers (vertical lines at cue positions) — deferred
+- [ ] Mix history view — browse past sessions with tracklist + transitions — deferred
+- [x] Right-click context menu on library rows (load to A/B, classify, delete)
+- [ ] Responsive layout improvements (smaller screens, collapsible panels) — deferred
 
-## Phase 24: Batch Operations & AI Polish
-- [ ] Batch classification — "Classify All" button for unclassified tracks
-- [ ] Progress indicator for batch classification (X/Y tracks done)
-- [ ] UI to view/edit AI classifications per track (inline edit or modal)
-- [ ] AI feedback loop — thumb up/down on transitions to weight future scoring
-- [ ] Set energy arc goal (build → peak → cool) as AI input parameter
+## Phase 24: Batch Operations & AI Polish ✅
+- [x] Batch classification — "Classify All" button for unclassified tracks
+- [x] Progress indicator for batch classification (X/Y tracks done)
+- [ ] UI to view/edit AI classifications per track (inline edit or modal) — deferred
+- [ ] AI feedback loop — thumb up/down on transitions to weight future scoring — deferred
+- [ ] Set energy arc goal (build → peak → cool) as AI input parameter — deferred
 
-## Phase 25: Safety & Reliability
-- [ ] Silence detection in engine (RMS monitoring on master output)
-- [ ] Fallback ladder: silence detected → auto-load + play next track
-- [ ] End-of-track detection (audio signal, not just position %)
-- [ ] Buffer underrun counter + logging
-- [ ] Crash-safe session recovery (persist playback state, resume on relaunch)
+## Phase 25: Safety & Reliability ✅
+- [x] Silence detection in engine (RMS monitoring on master output)
+- [x] Fallback ladder: silence detected → auto-load + play next track
+- [ ] End-of-track detection (audio signal, not just position %) — deferred
+- [x] Buffer underrun counter + logging
+- [ ] Crash-safe session recovery (persist playback state, resume on relaunch) — deferred
 
 ## Phase 26: Real-time Metering & Beat Tracking
 - [ ] Replace synthetic beat grid with DP beat tracker (Ellis 2007)

@@ -2,6 +2,8 @@ import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import { useStore, EngineState, DjMode, AutodjStatus } from "./store";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import logo from "./assets/logo.png";
 
 function formatTime(ms: number): string {
@@ -29,11 +31,38 @@ function formatGroove(groove: string): string {
 // ─── Library View ────────────────────────────────────────────────
 
 function LibraryView() {
-    const { tracks, importing, fetchTracks, importFiles, loadTrack, clearLibrary, analyzingTracks } = useStore();
+    const { tracks, importing, fetchTracks, importFiles, loadTrack, clearLibrary, analyzingTracks, libraryFilters, setLibraryFilters, clearLibraryFilters, analyzeTrack, classifyTrack, classifyAll, batchClassifying, batchClassifyProgress, aiConfig } = useStore();
+    const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; trackId: string } | null>(null);
 
     useEffect(() => {
         fetchTracks();
     }, [fetchTracks]);
+
+    // Debounced search
+    const handleSearchChange = useCallback((value: string) => {
+        setLibraryFilters({ query: value });
+        if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = setTimeout(() => {
+            useStore.getState().fetchTracks();
+        }, 300);
+    }, [setLibraryFilters]);
+
+    const handleFilterChange = useCallback((key: string, value: string) => {
+        setLibraryFilters({ [key]: value } as any);
+        // Fetch immediately for dropdown changes
+        setTimeout(() => useStore.getState().fetchTracks(), 0);
+    }, [setLibraryFilters]);
+
+    const handleSort = useCallback((column: string) => {
+        const f = useStore.getState().libraryFilters;
+        if (f.sortBy === column) {
+            setLibraryFilters({ sortOrder: f.sortOrder === "asc" ? "desc" : "asc" });
+        } else {
+            setLibraryFilters({ sortBy: column, sortOrder: "asc" });
+        }
+        setTimeout(() => useStore.getState().fetchTracks(), 0);
+    }, [setLibraryFilters]);
 
     const handleImport = useCallback(async () => {
         const selected = await open({
@@ -57,17 +86,33 @@ function LibraryView() {
         }
     }, [clearLibrary]);
 
+    const sortIndicator = (col: string) => {
+        if (libraryFilters.sortBy !== col) return "";
+        return libraryFilters.sortOrder === "asc" ? " \u25B2" : " \u25BC";
+    };
+
+    const hasFilters = libraryFilters.query || libraryFilters.genre || libraryFilters.mood || libraryFilters.bpmMin || libraryFilters.bpmMax || libraryFilters.keyFilter;
+
+    // Close context menu on outside click
+    useEffect(() => {
+        const handleClick = () => setContextMenu(null);
+        if (contextMenu) {
+            document.addEventListener("click", handleClick);
+            return () => document.removeEventListener("click", handleClick);
+        }
+    }, [contextMenu]);
+
     return (
         <div className="library">
             <div className="library-toolbar">
-                <div style={{ display: "flex", gap: "10px" }}>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                     <button
                         className="import-btn"
                         onClick={handleImport}
                         disabled={importing}
                         style={{ backgroundColor: "#4CAF50", color: "white", border: "none" }}
                     >
-                        {importing ? "⟳ Importing..." : "＋ Import Files"}
+                        {importing ? "⟳ Importing..." : "+ Import Files"}
                     </button>
                     <button
                         onClick={handleClear}
@@ -82,22 +127,95 @@ function LibraryView() {
                             opacity: importing || tracks.length === 0 ? 0.5 : 1
                         }}
                     >
-                        🗑 Clear Library
+                        Clear
                     </button>
+                    {aiConfig?.api_key && (
+                        <button
+                            onClick={classifyAll}
+                            disabled={batchClassifying || tracks.length === 0}
+                            style={{
+                                padding: "8px 16px",
+                                backgroundColor: batchClassifying ? "var(--bg-elevated)" : "rgba(178, 102, 255, 0.8)",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: batchClassifying || tracks.length === 0 ? "not-allowed" : "pointer",
+                                opacity: batchClassifying || tracks.length === 0 ? 0.7 : 1,
+                                fontSize: "13px",
+                                fontWeight: 600,
+                            }}
+                        >
+                            {batchClassifying
+                                ? `Classifying ${batchClassifyProgress.done}/${batchClassifyProgress.total}`
+                                : "Classify All"}
+                        </button>
+                    )}
+                </div>
+                <div className="library-search">
+                    <input
+                        type="text"
+                        className="search-input"
+                        placeholder="Search title, artist..."
+                        value={libraryFilters.query}
+                        onChange={(e) => handleSearchChange(e.target.value)}
+                    />
                 </div>
                 <span className="track-count">{tracks.length} tracks</span>
             </div>
 
+            <div className="library-filters">
+                <input
+                    type="text"
+                    className="filter-input"
+                    placeholder="Genre"
+                    value={libraryFilters.genre}
+                    onChange={(e) => handleFilterChange("genre", e.target.value)}
+                />
+                <input
+                    type="text"
+                    className="filter-input"
+                    placeholder="Mood"
+                    value={libraryFilters.mood}
+                    onChange={(e) => handleFilterChange("mood", e.target.value)}
+                />
+                <input
+                    type="number"
+                    className="filter-input filter-bpm"
+                    placeholder="BPM min"
+                    value={libraryFilters.bpmMin}
+                    onChange={(e) => handleFilterChange("bpmMin", e.target.value)}
+                />
+                <input
+                    type="number"
+                    className="filter-input filter-bpm"
+                    placeholder="BPM max"
+                    value={libraryFilters.bpmMax}
+                    onChange={(e) => handleFilterChange("bpmMax", e.target.value)}
+                />
+                <input
+                    type="text"
+                    className="filter-input"
+                    placeholder="Key"
+                    value={libraryFilters.keyFilter}
+                    onChange={(e) => handleFilterChange("keyFilter", e.target.value)}
+                />
+                {hasFilters && (
+                    <button className="filter-clear-btn" onClick={clearLibraryFilters}>
+                        Clear Filters
+                    </button>
+                )}
+            </div>
+
             <div className="track-list">
                 <div className="track-list-header">
-                    <span>Title</span>
-                    <span>Artist</span>
-                    <span>BPM</span>
+                    <span className="sortable" onClick={() => handleSort("title")}>Title{sortIndicator("title")}</span>
+                    <span className="sortable" onClick={() => handleSort("artist")}>Artist{sortIndicator("artist")}</span>
+                    <span className="sortable" onClick={() => handleSort("bpm")}>BPM{sortIndicator("bpm")}</span>
                     <span>Groove</span>
-                    <span>Key</span>
-                    <span>Genre</span>
-                    <span>Mood</span>
-                    <span>Duration</span>
+                    <span className="sortable" onClick={() => handleSort("key")}>Key{sortIndicator("key")}</span>
+                    <span className="sortable" onClick={() => handleSort("genre")}>Genre{sortIndicator("genre")}</span>
+                    <span className="sortable" onClick={() => handleSort("mood")}>Mood{sortIndicator("mood")}</span>
+                    <span className="sortable" onClick={() => handleSort("duration")}>Duration{sortIndicator("duration")}</span>
                     <span>Status</span>
                 </div>
                 {tracks.length === 0 ? (
@@ -109,7 +227,10 @@ function LibraryView() {
                     tracks.map((track) => {
                         const isAnalyzing = analyzingTracks.has(track.id);
                         return (
-                            <div className="track-row" key={track.id}>
+                            <div className="track-row" key={track.id} onContextMenu={(e) => {
+                                            e.preventDefault();
+                                            setContextMenu({ x: e.clientX, y: e.clientY, trackId: track.id });
+                                        }}>
                                 <span className="track-title">
                                     {track.title || "Unknown Title"}
                                 </span>
@@ -181,6 +302,28 @@ function LibraryView() {
                     })
                 )}
             </div>
+
+            {/* Context Menu */}
+            {contextMenu && (
+                <div
+                    className="context-menu"
+                    style={{ top: contextMenu.y, left: contextMenu.x }}
+                >
+                    <button onClick={() => { loadTrack("a", contextMenu.trackId); setContextMenu(null); }}>
+                        Load to Deck A
+                    </button>
+                    <button onClick={() => { loadTrack("b", contextMenu.trackId); setContextMenu(null); }}>
+                        Load to Deck B
+                    </button>
+                    <div className="context-menu-divider" />
+                    <button onClick={() => { analyzeTrack(contextMenu.trackId); setContextMenu(null); }}>
+                        Re-analyze
+                    </button>
+                    <button onClick={() => { classifyTrack(contextMenu.trackId); setContextMenu(null); }}>
+                        Classify with AI
+                    </button>
+                </div>
+            )}
         </div>
     );
 }
@@ -324,6 +467,10 @@ function DeckPanel({
     const isEmpty = !snapshot || snapshot.state === "empty";
     const loopActive = snapshot?.loop_active ?? false;
 
+    // ── Album Art + Hot Cues ─────────────────────────────────────
+    const [albumArtUrl, setAlbumArtUrl] = useState<string | null>(null);
+    const [hotCues, setHotCues] = useState<Array<{ index: number; position_ms: number; label: string | null }>>([]);
+
     // ── Waveform State ──────────────────────────────────────────
     const [trackProfile, setTrackProfile] = useState<any>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -347,12 +494,26 @@ function DeckPanel({
         return best;
     }, [snapshot?.duration_ms, snapshot?.state, tracks]);
 
-    // Fetch profile once when track ID changes
+    // Fetch profile, album art, and hot cues when track changes
     useEffect(() => {
         if (matchedTrack?.id) {
             getTrackProfile(matchedTrack.id).then(setTrackProfile);
+            // Fetch album art
+            invoke<string | null>("get_album_art", { trackId: matchedTrack.id }).then(path => {
+                if (path) {
+                    setAlbumArtUrl(convertFileSrc(path));
+                } else {
+                    setAlbumArtUrl(null);
+                }
+            }).catch(() => setAlbumArtUrl(null));
+            // Fetch hot cues
+            invoke<Array<[number, number, string | null]>>("get_hot_cues", { trackId: matchedTrack.id }).then(cues => {
+                setHotCues(cues.map(([index, position_ms, label]) => ({ index, position_ms, label })));
+            }).catch(() => setHotCues([]));
         } else {
             setTrackProfile(null);
+            setAlbumArtUrl(null);
+            setHotCues([]);
         }
     }, [matchedTrack?.id, getTrackProfile]);
 
@@ -471,9 +632,40 @@ function DeckPanel({
         setLocalBpm(originalBpm);
     }, [originalBpm]);
 
+    const handleSetHotCue = async (index: number) => {
+        if (!matchedTrack?.id || !snapshot) return;
+        const posMs = snapshot.position_ms;
+        await invoke("set_hot_cue", { trackId: matchedTrack.id, cueIndex: index, positionMs: posMs, label: null });
+        setHotCues(prev => {
+            const existing = prev.filter(c => c.index !== index);
+            return [...existing, { index, position_ms: posMs, label: null }].sort((a, b) => a.index - b.index);
+        });
+    };
+
+    const handleJumpHotCue = async (index: number) => {
+        if (!matchedTrack?.id) return;
+        await invoke("jump_to_hot_cue", { deck: deckId === "A" ? "a" : "b", trackId: matchedTrack.id, cueIndex: index });
+    };
+
+    const hotCueColors = ["#ff3333", "#33ff33", "#3333ff", "#ffff33"];
+
     return (
         <div className={`deck ${className}`}>
-            <div className="deck-label">DECK {deckId}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div className="deck-label">DECK {deckId}</div>
+                {albumArtUrl && (
+                    <img
+                        src={albumArtUrl}
+                        alt="Album Art"
+                        className="deck-album-art"
+                    />
+                )}
+                {!isEmpty && matchedTrack && (
+                    <span style={{ fontSize: "12px", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                        {matchedTrack.artist || ""}
+                    </span>
+                )}
+            </div>
 
             {isEmpty ? (
                 <div className="waveform-placeholder">No track loaded</div>
@@ -805,6 +997,28 @@ function DeckPanel({
                             )}
                         </div>
                     </div>
+
+                    {/* Hot Cue buttons */}
+                    <div className="loop-controls-group">
+                        <span className="loop-section-label">CUE</span>
+                        <div className="loop-buttons">
+                            {[0, 1, 2, 3].map((idx) => {
+                                const cue = hotCues.find(c => c.index === idx);
+                                return (
+                                    <button
+                                        key={idx}
+                                        className={`transport-btn hot-cue-btn ${cue ? "hot-cue-set" : ""}`}
+                                        style={cue ? { borderColor: hotCueColors[idx], color: hotCueColors[idx] } : {}}
+                                        onClick={() => cue ? handleJumpHotCue(idx) : handleSetHotCue(idx)}
+                                        disabled={isEmpty}
+                                        title={cue ? `Jump to ${formatTime(cue.position_ms)}` : `Set cue ${idx + 1}`}
+                                    >
+                                        {idx + 1}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
                 </div>
             )}
         </div>
@@ -1001,6 +1215,36 @@ function AiPanel() {
 
             const profile = cachedProfileRef.current;
             const emergencyFraction = 0.92;
+
+            // ── Silence detection: if >3 seconds of silence, emergency load ──
+            if (es.silence_frames > 90 && !transitionLockRef.current) {
+                // 90 snapshots at 30Hz = ~3 seconds of silence
+                console.warn("AutoDJ: silence detected for >3s, triggering emergency load");
+                autodjPhaseRef.current = "planning";
+                setAutodjStatus("error", "Silence detected — loading next track...");
+                const others = analyzedTracks.filter(t => t.id !== playingSnap.track_id);
+                if (others.length > 0) {
+                    const pick = others[Math.floor(Math.random() * others.length)];
+                    await state.loadTrack(idleDeck, pick.id);
+                    await new Promise(r => setTimeout(r, 500));
+                    transitionLockRef.current = true;
+                    autodjPhaseRef.current = "transitioning";
+                    try {
+                        await state.executeTransition(idleDeck.toUpperCase(), "filter_sweep", 4);
+                    } catch (e) {
+                        console.error("Silence recovery transition failed:", e);
+                    }
+                    setTimeout(() => {
+                        transitionLockRef.current = false;
+                        autodjPhaseRef.current = "monitoring";
+                        cachedProfileRef.current = null;
+                        cachedProfileTrackIdRef.current = null;
+                        state.clearAiDecision();
+                        setAutodjStatus("monitoring", "Recovered from silence");
+                    }, 3000);
+                }
+                return;
+            }
 
             if (autodjPhaseRef.current !== "monitoring") {
                 // Emergency safety: track almost done and no transition started
@@ -1473,17 +1717,24 @@ function TransitionsPanel() {
     );
 }
 
-// ─── AI Config Panel ─────────────────────────────────────────────
+// ─── Settings Panel ─────────────────────────────────────────────
 
-function AiConfigPanel() {
-    const aiConfig = useStore((state) => state.aiConfig);
-    const setAiConfig = useStore((state) => state.setAiConfig);
+function SettingsPanel() {
+    const { aiConfig, setAiConfig, audioDevices, getAudioDevices, savePreference, loadPreference } = useStore();
     const [apiKey, setApiKey] = useState("");
     const [isSaving, setIsSaving] = useState(false);
+    const [defaultTemplate, setDefaultTemplate] = useState("smooth_beatmix");
+    const [defaultDuration, setDefaultDuration] = useState(16);
+    const [settingsTab, setSettingsTab] = useState<"ai" | "audio" | "autodj">("ai");
 
+    // Load audio devices and saved preferences
+    useEffect(() => {
+        getAudioDevices();
+        loadPreference("default_template").then(v => { if (v) setDefaultTemplate(v); });
+        loadPreference("default_duration").then(v => { if (v) setDefaultDuration(Number(v)); });
+    }, []);
 
-
-    const handleSave = async () => {
+    const handleSaveAi = async () => {
         setIsSaving(true);
         try {
             await setAiConfig({
@@ -1493,7 +1744,7 @@ function AiConfigPanel() {
                 model: "gemini-1.5-pro",
                 endpoint_url: "https://generativelanguage.googleapis.com/v1beta/models"
             });
-            setApiKey(""); // Clear so it shows the masked view
+            setApiKey("");
         } catch (err) {
             console.error("Failed to save AI config:", err);
         } finally {
@@ -1501,60 +1752,162 @@ function AiConfigPanel() {
         }
     };
 
+    const handleSaveDefaults = async () => {
+        await savePreference("default_template", defaultTemplate);
+        await savePreference("default_duration", String(defaultDuration));
+    };
+
+    const tabStyle = (tab: string) => ({
+        padding: "6px 14px",
+        borderRadius: "6px",
+        border: "none",
+        background: settingsTab === tab ? "var(--bg-elevated)" : "transparent",
+        color: settingsTab === tab ? "var(--accent-a)" : "var(--text-muted)",
+        fontSize: "11px",
+        fontWeight: 700 as const,
+        cursor: "pointer" as const,
+        textTransform: "uppercase" as const,
+        letterSpacing: "0.5px",
+    });
+
+    const inputStyle = {
+        padding: "10px",
+        background: "rgba(0,0,0,0.2)",
+        border: "1px solid var(--border)",
+        borderRadius: "6px",
+        color: "var(--text-primary)",
+        fontFamily: "var(--font-mono)",
+        fontSize: "13px",
+        width: "100%",
+    };
+
+    const labelStyle = {
+        fontSize: "11px",
+        color: "var(--text-muted)",
+        fontWeight: 600 as const,
+        textTransform: "uppercase" as const,
+        letterSpacing: "0.5px",
+    };
+
     return (
-        <div className="ai-panel ai-panel-card" style={{ flex: 1, minWidth: "300px" }}>
-            <h3 style={{ margin: "0 0 15px 0", fontSize: "14px", textTransform: "uppercase", letterSpacing: "1px", color: "var(--text-secondary)", fontFamily: "var(--font-display)" }}>
-                ⚙️ Gemini AI Integration
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <h3 style={{ margin: 0, fontSize: "16px", fontFamily: "var(--font-display)", color: "var(--text-primary)" }}>
+                Settings
             </h3>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-                    <label style={{ fontSize: "12px", color: "#888" }}>GEMINI API KEY</label>
-                    {aiConfig?.api_key && apiKey === "" ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border)" }}>
-                            <span style={{ fontFamily: "monospace", color: "var(--status-ready)", flex: 1, fontSize: "14px" }}>
-                                ✓ {aiConfig.api_key.substring(0, 4)}....{aiConfig.api_key.slice(-4)}X
-                            </span>
-                            <button onClick={() => setApiKey(aiConfig.api_key)} style={{ background: "transparent", border: "1px solid #555", color: "#ccc", borderRadius: "4px", cursor: "pointer", padding: "4px 8px", fontSize: "10px", fontWeight: "bold", transition: "all 0.2s ease" }}>
-                                EDIT
-                            </button>
-                        </div>
-                    ) : (
-                        <input
-                            type="password"
-                            placeholder="AIzeSy..."
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
-                            style={{
-                                padding: "10px",
-                                background: "rgba(0,0,0,0.2)",
-                                border: "1px solid var(--border)",
-                                borderRadius: "6px",
-                                color: "var(--text)",
-                                fontFamily: "monospace"
-                            }}
-                        />
-                    )}
-                </div>
-
-                <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    style={{
-                        padding: "10px",
-                        background: apiKey ? "var(--primary-glow)" : "var(--surface)",
-                        color: apiKey ? "#fff" : "var(--text-muted)",
-                        border: "none",
-                        borderRadius: "6px",
-                        fontWeight: "bold",
-                        cursor: isSaving || !apiKey ? "not-allowed" : "pointer",
-                        transition: "all 0.2s ease",
-                        marginTop: "8px"
-                    }}
-                >
-                    {isSaving ? "Saving..." : "Save AI Credentials"}
-                </button>
+            <div style={{ display: "flex", gap: "4px", background: "var(--bg-deepest)", padding: "4px", borderRadius: "8px" }}>
+                <button style={tabStyle("ai")} onClick={() => setSettingsTab("ai")}>AI</button>
+                <button style={tabStyle("audio")} onClick={() => setSettingsTab("audio")}>Audio</button>
+                <button style={tabStyle("autodj")} onClick={() => setSettingsTab("autodj")}>AutoDJ</button>
             </div>
+
+            {settingsTab === "ai" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                        <label style={labelStyle}>Gemini API Key</label>
+                        {aiConfig?.api_key && apiKey === "" ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border)" }}>
+                                <span style={{ fontFamily: "monospace", color: "var(--status-ready)", flex: 1, fontSize: "14px" }}>
+                                    ✓ {aiConfig.api_key.substring(0, 4)}....{aiConfig.api_key.slice(-4)}
+                                </span>
+                                <button onClick={() => setApiKey(aiConfig.api_key)} style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text-secondary)", borderRadius: "4px", cursor: "pointer", padding: "4px 8px", fontSize: "10px", fontWeight: "bold" }}>
+                                    EDIT
+                                </button>
+                            </div>
+                        ) : (
+                            <input
+                                type="password"
+                                placeholder="AIzeSy..."
+                                value={apiKey}
+                                onChange={(e) => setApiKey(e.target.value)}
+                                style={inputStyle}
+                            />
+                        )}
+                    </div>
+                    <button
+                        onClick={handleSaveAi}
+                        disabled={isSaving || !apiKey}
+                        style={{
+                            padding: "10px",
+                            background: apiKey ? "linear-gradient(135deg, var(--accent-a), #0099cc)" : "var(--bg-elevated)",
+                            color: apiKey ? "var(--bg-deepest)" : "var(--text-muted)",
+                            border: "none",
+                            borderRadius: "6px",
+                            fontWeight: "bold",
+                            cursor: isSaving || !apiKey ? "not-allowed" : "pointer",
+                        }}
+                    >
+                        {isSaving ? "Saving..." : "Save AI Credentials"}
+                    </button>
+                </div>
+            )}
+
+            {settingsTab === "audio" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                        <label style={labelStyle}>Output Device</label>
+                        {audioDevices.length > 0 ? (
+                            <select style={{ ...inputStyle, cursor: "pointer" }}>
+                                {audioDevices.map((d, i) => (
+                                    <option key={i} value={d}>{d}</option>
+                                ))}
+                            </select>
+                        ) : (
+                            <span style={{ fontSize: "12px", color: "var(--text-muted)", padding: "10px", background: "rgba(0,0,0,0.2)", borderRadius: "6px" }}>
+                                No output devices detected
+                            </span>
+                        )}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                        Audio device hot-swap requires app restart.
+                    </div>
+                </div>
+            )}
+
+            {settingsTab === "autodj" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                        <label style={labelStyle}>Default Transition Style</label>
+                        <select
+                            value={defaultTemplate}
+                            onChange={(e) => setDefaultTemplate(e.target.value)}
+                            style={{ ...inputStyle, cursor: "pointer" }}
+                        >
+                            <option value="smooth_beatmix">Smooth Beatmix</option>
+                            <option value="filter_sweep">Filter Sweep</option>
+                            <option value="echo_drop">Echo Drop</option>
+                            <option value="drop_swap">Drop Swap</option>
+                            <option value="loop_roll">Loop Roll</option>
+                            <option value="bass_kill_swap">Bass Kill Swap</option>
+                            <option value="break_blend">Break Blend</option>
+                        </select>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                        <label style={labelStyle}>Default Transition Duration ({defaultDuration} bars)</label>
+                        <input
+                            type="range"
+                            min={4} max={64} step={4}
+                            value={defaultDuration}
+                            onChange={(e) => setDefaultDuration(Number(e.target.value))}
+                            style={{ width: "100%", cursor: "pointer" }}
+                        />
+                    </div>
+                    <button
+                        onClick={handleSaveDefaults}
+                        style={{
+                            padding: "10px",
+                            background: "linear-gradient(135deg, var(--accent-a), #0099cc)",
+                            color: "var(--bg-deepest)",
+                            border: "none",
+                            borderRadius: "6px",
+                            fontWeight: "bold",
+                            cursor: "pointer",
+                        }}
+                    >
+                        Save Defaults
+                    </button>
+                </div>
+            )}
         </div>
     );
 }
@@ -1676,7 +2029,7 @@ export default function App() {
                 <div className="settings-modal-overlay" onClick={() => setIsSettingsOpen(false)}>
                     <div className="settings-modal" onClick={e => e.stopPropagation()}>
                         <button className="settings-modal-close" onClick={() => setIsSettingsOpen(false)}>✕</button>
-                        <AiConfigPanel />
+                        <SettingsPanel />
                     </div>
                 </div>
             )}

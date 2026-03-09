@@ -230,6 +230,81 @@ body {
   color: var(--text-muted);
 }
 
+.library-search {
+  flex: 1;
+  max-width: 300px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}
+
+.library-filters {
+  display: flex;
+  gap: 8px;
+  padding: 0 var(--gap-md) var(--gap-sm);
+  flex-wrap: wrap;
+}
+
+.filter-input {
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  width: 80px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.filter-input:focus {
+  border-color: var(--accent);
+}
+
+.filter-bpm {
+  width: 65px;
+}
+
+.filter-clear-btn {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-clear-btn:hover {
+  background: rgba(0, 212, 255, 0.1);
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.sortable:hover {
+  color: var(--accent);
+}
+
 .track-list {
   flex: 1;
   overflow-y: auto;
@@ -1108,6 +1183,69 @@ body {
 /* Reset button: slightly larger icon */
 .reset-btn {
   font-size: 15px;
+}
+
+/* -- Album Art in Deck -- */
+.deck-album-art {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* -- Hot Cue Buttons -- */
+.hot-cue-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.hot-cue-btn.hot-cue-set {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.1);
+}
+
+/* -- Context Menu -- */
+.context-menu {
+  position: fixed;
+  z-index: 2000;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  padding: 4px 0;
+  min-width: 160px;
+}
+
+.context-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.context-menu button:hover {
+  background: var(--bg-hover);
+  color: var(--accent-a);
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
 }
 
 /* Scrollbar */

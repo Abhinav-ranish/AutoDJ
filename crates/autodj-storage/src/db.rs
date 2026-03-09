@@ -365,6 +365,117 @@ impl Database {
         Ok(tracks)
     }
 
+    /// Search and filter tracks with optional sorting.
+    pub fn search_tracks(
+        &self,
+        query: Option<&str>,
+        genre_filter: Option<&str>,
+        mood_filter: Option<&str>,
+        bpm_min: Option<f64>,
+        bpm_max: Option<f64>,
+        key_filter: Option<&str>,
+        sort_by: Option<&str>,
+        sort_order: Option<&str>,
+    ) -> Result<Vec<TrackRecord>, DbError> {
+        let mut sql = String::from(
+            "SELECT t.id, t.file_hash, t.original_path, t.title, t.artist, t.duration_ms, t.import_status, t.error_message, p.bpm, p.perceived_tempo, p.groove_type, p.key_name, p.lufs, p.genre, p.mood, p.vibe
+             FROM tracks t
+             LEFT JOIN track_profiles p ON t.id = p.track_id
+             WHERE 1=1"
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+        if let Some(q) = query {
+            if !q.is_empty() {
+                sql.push_str(" AND (t.title LIKE ?1 OR t.artist LIKE ?1 OR t.original_path LIKE ?1)");
+                params_vec.push(Box::new(format!("%{q}%")));
+            }
+        }
+
+        let mut param_idx = params_vec.len() + 1;
+
+        if let Some(g) = genre_filter {
+            if !g.is_empty() {
+                sql.push_str(&format!(" AND p.genre LIKE ?{param_idx}"));
+                params_vec.push(Box::new(format!("%{g}%")));
+                param_idx += 1;
+            }
+        }
+
+        if let Some(m) = mood_filter {
+            if !m.is_empty() {
+                sql.push_str(&format!(" AND p.mood LIKE ?{param_idx}"));
+                params_vec.push(Box::new(format!("%{m}%")));
+                param_idx += 1;
+            }
+        }
+
+        if let Some(bmin) = bpm_min {
+            sql.push_str(&format!(" AND p.bpm >= ?{param_idx}"));
+            params_vec.push(Box::new(bmin));
+            param_idx += 1;
+        }
+
+        if let Some(bmax) = bpm_max {
+            sql.push_str(&format!(" AND p.bpm <= ?{param_idx}"));
+            params_vec.push(Box::new(bmax));
+            param_idx += 1;
+        }
+
+        if let Some(k) = key_filter {
+            if !k.is_empty() {
+                sql.push_str(&format!(" AND p.key_name = ?{param_idx}"));
+                params_vec.push(Box::new(k.to_string()));
+                let _ = param_idx; // suppress unused warning
+            }
+        }
+
+        let order_col = match sort_by.unwrap_or("created_at") {
+            "title" => "t.title",
+            "artist" => "t.artist",
+            "bpm" => "p.bpm",
+            "key" => "p.key_name",
+            "genre" => "p.genre",
+            "mood" => "p.mood",
+            "duration" => "t.duration_ms",
+            _ => "t.created_at",
+        };
+        let order_dir = match sort_order.unwrap_or("desc") {
+            "asc" => "ASC",
+            _ => "DESC",
+        };
+        sql.push_str(&format!(" ORDER BY {order_col} {order_dir}"));
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok(TrackRecord {
+                id: row.get(0)?,
+                file_hash: row.get(1)?,
+                original_path: row.get(2)?,
+                title: row.get(3)?,
+                artist: row.get(4)?,
+                duration_ms: row.get(5)?,
+                import_status: row.get(6)?,
+                error_message: row.get(7)?,
+                bpm: row.get(8)?,
+                perceived_tempo: row.get(9)?,
+                groove_type: row.get(10)?,
+                key: row.get(11)?,
+                lufs: row.get(12)?,
+                genre: row.get(13)?,
+                mood: row.get(14)?,
+                vibe: row.get(15)?,
+            })
+        })?;
+
+        let mut tracks = Vec::new();
+        for row in rows {
+            tracks.push(row?);
+        }
+        Ok(tracks)
+    }
+
     /// Save a track profile to the database.
     pub fn save_track_profile(&self, data: &ProfileData) -> Result<(), DbError> {
         let now = std::time::SystemTime::now()
@@ -691,6 +802,53 @@ impl Database {
             params![id, session_id, from_track_id, to_track_id, template_used, rating, notes, decision_json, now],
         )?;
         Ok(())
+    }
+    // ─── Preferences ──────────────────────────────────────────────
+
+    /// Get a preference value by key.
+    pub fn get_preference(&self, key: &str) -> Result<Option<String>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT value FROM preferences WHERE key = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![key], |row| row.get(0))?;
+        match rows.next() {
+            Some(Ok(value)) => Ok(Some(value)),
+            Some(Err(e)) => Err(DbError::Sqlite(e)),
+            None => Ok(None),
+        }
+    }
+
+    /// Set a preference value (upsert).
+    pub fn set_preference(&self, key: &str, value: &str) -> Result<(), DbError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        self.conn.execute(
+            "INSERT INTO preferences (key, value, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            params![key, value, now],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a preference by key.
+    pub fn delete_preference(&self, key: &str) -> Result<(), DbError> {
+        self.conn.execute("DELETE FROM preferences WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
+    /// Get all preferences as key-value pairs.
+    pub fn get_all_preferences(&self) -> Result<Vec<(String, String)>, DbError> {
+        let mut stmt = self.conn.prepare("SELECT key, value FROM preferences ORDER BY key")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut prefs = Vec::new();
+        for row in rows {
+            prefs.push(row?);
+        }
+        Ok(prefs)
     }
 }
 

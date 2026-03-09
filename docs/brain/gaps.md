@@ -125,6 +125,100 @@ All code quality items resolved in commits `ddfdfa4`–`817eff6`:
 
 ---
 
+## ✅ Phases 18–20 — Autonomous Mixing & AI Performance Controls
+
+| Phase | Feature | Status |
+|-------|---------|--------|
+| 18 | Autonomous AutoDJ Loop (position-aware controller, auto-classify, chaining) | **Complete** |
+| 19 | DJ-Style Live Mixing (section-aware windows, phrase alignment, 4 new templates) | **Complete** |
+| 20 | AI Performance Controls (EQ isolator/kills, decision schema v2, action timelines) | **Complete** |
+
+**All 31 tests passing, zero warnings.** TypeScript compiles clean.
+
+### Phase 19 Implementation Details:
+- `TransitionWindow` struct with anchor/start/end/score fields (`profile.rs`)
+- `generate_transition_windows()` computes safe mix windows from section markers (`sections.rs`)
+- `build_phrase_grid()` + `next_phrase_boundary()` for 8-bar phrase alignment (`sections.rs`)
+- `generate_auto_cues()` produces `CUE_INTRO`, `CUE_DROP`, `CUE_BREAK`, `CUE_OUTRO`, `CUE_FIRST_BEAT` (`sections.rs`)
+- `auto_cues` DB table + `save_auto_cues()`/`get_auto_cues()` methods (`db.rs`)
+- 4 new transition templates: `DropSwap`, `LoopRoll`, `BassKillSwap`, `BreakBlend` (`transition.rs`)
+- AutoDJ controller overhauled: section-aware windowed triggers, phrase boundary alignment, `aligning` phase in FSM (`App.tsx`)
+
+### Phase 20 Implementation Details:
+- LR4 cascade isolator mode + per-band kill switches in EQ (`eq.rs`)
+- `SetEqKill`, `SetEqMode`, `SeekMs` engine commands (`command.rs`, `engine.rs`)
+- `MixAction` struct + `MixActionKind` enum (12 action types) in AI schema (`planner.rs`)
+- `build_heuristic_timeline()` generates full action sequences without LLM (`planner.rs`)
+- Expanded DJ system prompt with all 7 templates + safety constraints (`planner.rs`)
+- `transition_feedback` DB table for user learning hooks (`db.rs`)
+- AI timeline preview panel + reasoning tags + confidence badge (`App.tsx`)
+- 5 new Tauri commands: `set_eq_kill`, `set_eq_mode`, `seek_ms`, `get_auto_cues`, `submit_transition_feedback`
+
+### Known gaps deferred from Phase 19/20:
+- `BackspinExit` transition template (style-gated)
+- Regression test for "unsafe" zone scheduling avoidance
+- 4-band EQ mode (LOW/LOWMID/HIMID/HIGH)
+- Per-deck EQ presets
+- Action rate limiting (>N actions per 8 bars)
+- Preference bias from feedback in scorer
+- Live AI overlay on deck UI + "Lock controls" toggles
+
+---
+
+## ✅ Phases 21–25 — Library, Settings, Polish, Batch Ops, Safety
+
+| Phase | Feature | Status |
+|-------|---------|--------|
+| 21 | Library Search, Sort & Filter (SQL search, column sort, filter pills) | **Complete** |
+| 22 | Preferences & Settings (DB persistence, audio devices, settings panel) | **Complete** |
+| 23 | Visual Polish & UX (album art in decks, hot cue buttons, context menu) | **Complete** |
+| 24 | Batch Operations & AI Polish (Classify All with progress) | **Complete** |
+| 25 | Safety & Reliability (RMS silence detection, emergency recovery, underrun counter) | **Complete** |
+
+**65 tests passing, zero warnings.** TypeScript compiles clean.
+
+### Phase 21 Implementation Details:
+- `search_tracks` Tauri command with SQL `LIKE` search on title/artist
+- BPM range, key, genre, mood filter parameters
+- Column-header click-to-sort (toggles ASC/DESC)
+- Search bar + filter pills UI in library toolbar
+- Clear filters button to reset all
+
+### Phase 22 Implementation Details:
+- `get_preference()`/`set_preference()` DB methods for key-value preferences
+- AI config persisted to SQL (with localStorage migration on first load)
+- `get_audio_devices` command via `cpal` host device enumeration
+- `SettingsPanel` component with 3 tabs: AI, Audio, AutoDJ
+- Preferences restored on app launch via `initStore`
+
+### Phase 23 Implementation Details:
+- Album art display in deck headers (36x36 thumbnail via `convertFileSrc`)
+- 4 color-coded hot cue buttons (red/green/blue/yellow) — set on click if empty, jump if set
+- Right-click context menu on library rows (Load to A/B, Re-analyze, Classify)
+
+### Phase 24 Implementation Details:
+- "Classify All" button in library toolbar (visible when API key configured)
+- Sequential batch classification with progress display ("Classifying X/Y")
+- Skips already-classified and unanalyzed tracks
+
+### Phase 25 Implementation Details:
+- RMS-based silence detection in audio callback (~30Hz sampling aligned with snapshots)
+- Silence threshold: 0.0001 (~-80 dB), 90 consecutive frames (~3s) triggers emergency
+- `master_rms`, `silence_frames`, `underrun_count` fields added to `EngineStateSnapshot`
+- AutoDJ controller monitors silence_frames and triggers emergency track load
+
+### Known gaps deferred from Phases 21–25:
+- Waveform hot cue markers (vertical lines at cue positions)
+- Mix history view (browse past sessions)
+- Responsive layout improvements
+- Inline edit/modal for AI classifications
+- AI feedback loop (thumb up/down)
+- Energy arc goal parameter
+- End-of-track detection by audio signal
+- Crash-safe session recovery
+
+---
+
 ## 💡 Recommendations
 
 ### High Value / Low Effort

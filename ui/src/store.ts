@@ -40,6 +40,8 @@ export interface DeckSnapshot {
     loop_start_ms: number;
     loop_end_ms: number;
     speed: number;
+    rms: number;
+    peak: number;
 }
 
 export interface EngineState {
@@ -50,6 +52,10 @@ export interface EngineState {
     beat_number: number;
     bar_number: number;
     sample_pos: number;
+    master_rms: number;
+    silence_frames: number;
+    underrun_count: number;
+    spectrum: number[];
 }
 
 export interface MixAction {
@@ -83,6 +89,17 @@ export type AutodjStatus =
     | "transitioning"
     | "error";
 
+export interface LibraryFilters {
+    query: string;
+    genre: string;
+    mood: string;
+    bpmMin: string;
+    bpmMax: string;
+    keyFilter: string;
+    sortBy: string;
+    sortOrder: "asc" | "desc";
+}
+
 interface DJStore {
     tracks: TrackRecord[];
     engineState: EngineState | null;
@@ -97,6 +114,7 @@ interface DJStore {
     autodjStatus: AutodjStatus;
     autodjMessage: string;
     autodjTransitioning: boolean;
+    libraryFilters: LibraryFilters;
     aiConfig: {
         enabled: boolean;
         api_key: string;
@@ -109,6 +127,8 @@ interface DJStore {
     // Actions
     initStore: () => Promise<void>;
     fetchTracks: () => Promise<void>;
+    setLibraryFilters: (filters: Partial<LibraryFilters>) => void;
+    clearLibraryFilters: () => void;
     importFiles: (paths: string[]) => Promise<void>;
     loadTrack: (deck: "a" | "b", trackId: string) => Promise<void>;
     play: (deck: string) => Promise<void>;
@@ -147,6 +167,18 @@ interface DJStore {
     startRecording: () => Promise<void>;
     stopRecording: () => Promise<void>;
 
+    // Preferences & Devices
+    audioDevices: string[];
+    getAudioDevices: () => Promise<void>;
+    savePreference: (key: string, value: string) => Promise<void>;
+    loadPreference: (key: string) => Promise<string | null>;
+
+    // Batch operations
+    batchClassifying: boolean;
+    batchClassifyProgress: { done: number; total: number };
+    classifyAll: () => Promise<void>;
+    updateTrackClassification: (trackId: string, field: string, value: string) => Promise<void>;
+
     setErrorToast: (msg: string | null) => void;
     setEngineState: (state: EngineState) => void;
 }
@@ -168,6 +200,19 @@ export const useStore = create<DJStore>((set, get) => ({
     aiConfig: null,
     isRecording: false,
     recordingStartTime: null,
+    audioDevices: [],
+    batchClassifying: false,
+    batchClassifyProgress: { done: 0, total: 0 },
+    libraryFilters: {
+        query: "",
+        genre: "",
+        mood: "",
+        bpmMin: "",
+        bpmMax: "",
+        keyFilter: "",
+        sortBy: "created_at",
+        sortOrder: "desc" as const,
+    },
 
     setErrorToast: (msg: string | null) => {
         set({ errorToast: msg });
@@ -176,25 +221,70 @@ export const useStore = create<DJStore>((set, get) => ({
 
     initStore: async () => {
         try {
-            const saved = localStorage.getItem("autodj_ai_config");
-            if (saved) {
-                const config = JSON.parse(saved);
+            // Try DB preferences first, fallback to localStorage for migration
+            const dbConfig = await invoke<string | null>("get_preference", { key: "ai_config" });
+            if (dbConfig) {
+                const config = JSON.parse(dbConfig);
                 set({ aiConfig: config });
                 await invoke("set_ai_config", { config });
+            } else {
+                // Migrate from localStorage if present
+                const saved = localStorage.getItem("autodj_ai_config");
+                if (saved) {
+                    const config = JSON.parse(saved);
+                    set({ aiConfig: config });
+                    await invoke("set_ai_config", { config });
+                    // Persist to DB and clean up localStorage
+                    await invoke("set_preference", { key: "ai_config", value: saved });
+                    localStorage.removeItem("autodj_ai_config");
+                }
             }
         } catch (e) {
-            console.error("Failed to restore AI config from localStorage", e);
+            console.error("Failed to restore AI config", e);
         }
     },
 
     fetchTracks: async () => {
         try {
-            const tracks = await invoke<TrackRecord[]>("get_tracks");
+            const f = get().libraryFilters;
+            const params: Record<string, any> = {};
+            if (f.query) params.query = f.query;
+            if (f.genre) params.genre = f.genre;
+            if (f.mood) params.mood = f.mood;
+            if (f.bpmMin) params.bpmMin = parseFloat(f.bpmMin);
+            if (f.bpmMax) params.bpmMax = parseFloat(f.bpmMax);
+            if (f.keyFilter) params.keyFilter = f.keyFilter;
+            if (f.sortBy !== "created_at") params.sortBy = f.sortBy;
+            if (f.sortOrder !== "desc") params.sortOrder = f.sortOrder;
+            const tracks = await invoke<TrackRecord[]>("get_tracks", params);
             set({ tracks });
         } catch (e: any) {
             get().setErrorToast(`Failed to fetch tracks: ${e}`);
             console.error(e);
         }
+    },
+
+    setLibraryFilters: (filters: Partial<LibraryFilters>) => {
+        set((state) => ({
+            libraryFilters: { ...state.libraryFilters, ...filters },
+        }));
+        // Debounced fetch is handled by the UI component
+    },
+
+    clearLibraryFilters: () => {
+        set({
+            libraryFilters: {
+                query: "",
+                genre: "",
+                mood: "",
+                bpmMin: "",
+                bpmMax: "",
+                keyFilter: "",
+                sortBy: "created_at",
+                sortOrder: "desc",
+            },
+        });
+        get().fetchTracks();
     },
 
     importFiles: async (paths: string[]) => {
@@ -468,6 +558,74 @@ export const useStore = create<DJStore>((set, get) => ({
         }
     },
 
+    getAudioDevices: async () => {
+        try {
+            const devices = await invoke<string[]>("get_audio_devices");
+            set({ audioDevices: devices });
+        } catch (e: any) {
+            console.error("Failed to get audio devices:", e);
+        }
+    },
+
+    savePreference: async (key: string, value: string) => {
+        try {
+            await invoke("set_preference", { key, value });
+        } catch (e: any) {
+            console.error(`Failed to save preference ${key}:`, e);
+        }
+    },
+
+    loadPreference: async (key: string) => {
+        try {
+            return await invoke<string | null>("get_preference", { key });
+        } catch (e: any) {
+            console.error(`Failed to load preference ${key}:`, e);
+            return null;
+        }
+    },
+
+    classifyAll: async () => {
+        const state = get();
+        if (state.batchClassifying) return;
+        const unclassified = state.tracks.filter(
+            t => t.import_status === "analyzed" && !t.genre && !state.classifyingTracks.has(t.id)
+        );
+        if (unclassified.length === 0) {
+            get().setErrorToast("All analyzed tracks already classified");
+            return;
+        }
+        set({ batchClassifying: true, batchClassifyProgress: { done: 0, total: unclassified.length } });
+        for (let i = 0; i < unclassified.length; i++) {
+            try {
+                await get().classifyTrack(unclassified[i].id);
+            } catch (e) {
+                console.warn(`Batch classify failed for ${unclassified[i].id}:`, e);
+            }
+            set({ batchClassifyProgress: { done: i + 1, total: unclassified.length } });
+        }
+        set({ batchClassifying: false });
+        await get().fetchTracks();
+    },
+
+    updateTrackClassification: async (trackId: string, field: string, value: string) => {
+        try {
+            // Get existing classification first, update the field
+            const db_key = `classification_${trackId}_${field}`;
+            await invoke("set_preference", { key: db_key, value });
+            // Update local state
+            set((state) => ({
+                tracks: state.tracks.map(t => {
+                    if (t.id === trackId) {
+                        return { ...t, [field]: value };
+                    }
+                    return t;
+                })
+            }));
+        } catch (e: any) {
+            console.error(`Failed to update classification:`, e);
+        }
+    },
+
     setMode: async (mode: DjMode) => {
         try {
             await invoke("set_mode", { mode });
@@ -501,7 +659,7 @@ export const useStore = create<DJStore>((set, get) => ({
     setAiConfig: async (config: any) => {
         try {
             await invoke("set_ai_config", { config });
-            localStorage.setItem("autodj_ai_config", JSON.stringify(config));
+            await invoke("set_preference", { key: "ai_config", value: JSON.stringify(config) });
             set({ aiConfig: config });
         } catch (e: any) {
             get().setErrorToast(`Set AI config failed: ${e}`);

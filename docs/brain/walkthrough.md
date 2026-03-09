@@ -102,3 +102,44 @@ Here is a recording showing the functional React frontend for Auto-DJ:
 - **Session Management**: Automatically tracks DJ sessions with start/end times and multi-track history.
 - **History-Aware Mixing**: Recent plays are stored in SQLite and fed back into the AI to prevent playing the same artist or genre too frequently.
 - **Library Integration**: Surfaced session metadata and play counts in the background to improve future suggestion relevance.
+
+## Phase 18: Autonomous AutoDJ Loop
+
+- **Auto-Classify on Analysis**: Tracks are automatically classified via Gemini after analysis completes (if API key configured).
+- **Position-Aware Controller**: Replaced blind 10-second polling with position-based triggering at 75% track position or outro start.
+- **First Track Auto-Pick**: When entering AutoDJ mode with empty decks, the system auto-selects and loads a starting track.
+- **Intelligent Transitions**: Triggers at 75% position or outro start with emergency fallback at 92%.
+- **Continuous Chaining**: Deck A → B → A → B... alternation with decision lifecycle management (clear after transition completes).
+- **Status Feedback UI**: Real-time AutoDJ state display (monitoring, selecting, loading, transitioning).
+
+## Phase 19: DJ-Style Live Mixing + Phrase/Section-Aware Transitions
+
+- **Transition Windows** (`sections.rs`): `generate_transition_windows()` computes scored "safe mix" windows from energy-based section markers. Each `TransitionWindow` has an anchor type (start_of_outro, pre_drop, post_drop, break_start, mid_body), start/end ms, and a quality score.
+- **Phrase Grid** (`sections.rs`): `build_phrase_grid()` derives 8-bar phrase boundaries from the synthetic beat grid. `next_phrase_boundary()` snaps arbitrary timestamps to the nearest musical phrase.
+- **Auto-Cue Generation** (`sections.rs`): `generate_auto_cues()` produces canonical DJ markers (CUE_INTRO, CUE_DROP, CUE_BREAK, CUE_OUTRO, CUE_FIRST_BEAT) with confidence scores. Stored in new `auto_cues` DB table.
+- **New Transition Templates** (`transition.rs`): 4 additions bringing total to 7:
+  - `DropSwap`: HP filter sweep on outgoing → hard cut at drop, pre-tension EQ kill.
+  - `LoopRoll`: Progressive 4→2→1 bar stutter loop on outgoing → snap cut to incoming.
+  - `BassKillSwap`: Kill outgoing bass early, blend mids/highs, then swap bass mid-transition.
+  - `BreakBlend`: Gentle HP filter opening + quadratic gain curve, designed for breakdown blending to avoid vocal clash.
+- **Controller Overhaul** (`App.tsx`): State machine expanded to 6 phases: `idle → monitoring → planning → loading → aligning → transitioning`. Section-aware windowed triggers replace simple 75% position check — finds best upcoming window within 30 seconds, sorted by score. Phrase boundary alignment via 100ms polling with 15s timeout. Emergency fallback preserved at 92%.
+- **Pipeline Integration** (`pipeline.rs`): Transition windows, phrase info, and auto-cues computed during analysis and written to `TrackProfile`.
+
+## Phase 20: AI Performance Controls — EQ/Filter Automation + Decision Schema v2
+
+- **EQ Isolator Mode** (`eq.rs`): Added LR4 (Linkwitz-Riley 4th order) cascade filters for steep isolator slopes. Per-band kill switches (`kill_low`, `kill_mid`, `kill_high`) with instant -inf dB muting. `set_isolator_mode()` switches between Classic (LR2) and Isolator (LR4) modes.
+- **New Engine Commands** (`command.rs`, `engine.rs`):
+  - `SetEqKill(deck, band, enabled)` — toggle per-band kill switches.
+  - `SetEqMode(deck, Classic|Isolator)` — switch EQ filter topology.
+  - `SeekMs(deck, position_ms)` — millisecond-precise seeking.
+  - `DeckSnapshot` extended with `eq_kill_low/mid/high` + `eq_isolator` fields for UI sync.
+- **AI Decision Schema v2** (`planner.rs`):
+  - `MixAction` struct: `{ at_ms: u64, kind: MixActionKind }` — timestamped DJ actions.
+  - `MixActionKind` enum with 12 variants: `LoadTrack`, `SetTempo`, `SetGain`, `SetFilter`, `SetEqBand`, `SetEqKill`, `SetLoop`, `ClearLoop`, `SetCrossfader`, `Play`, `Pause`, `ExecuteTemplate`.
+  - `AiDecision` extended: `actions: Option<Vec<MixAction>>`, `reasoning_tags: Option<Vec<String>>`, `confidence: Option<f64>`.
+- **Heuristic Timeline Generation** (`planner.rs`): `build_heuristic_timeline()` generates concrete action sequences for each template type. Fallback heuristic now uses transition windows for timing (best future window + phrase snap). Template selection rules: vocal overlap → break_blend, energy jump > 0.3 + tempo mismatch → loop_roll, energy jump > 0.3 → drop_swap, genre change + similar energy → bass_kill_swap, energy drop → break_blend.
+- **Expanded System Prompt** (`planner.rs`): `DJ_SYSTEM_PROMPT` updated to describe all 7 templates, section-aware timing rules, action timeline v2 JSON format, and safety constraints (gain limits, sweep speed, kill rules).
+- **AI Context Enrichment** (`context.rs`): `CurrentStateContext` now includes `transition_windows: Vec<TransitionWindow>` and `auto_cues: Vec<AutoCue>`. `TrackProfileShort` includes `auto_cues`.
+- **User Feedback Storage** (`db.rs`): New `transition_feedback` table (session_id, from/to track, template, rating 1-5, notes, full decision JSON). `save_transition_feedback()` method for learning hooks.
+- **Tauri Commands** (`commands.rs` + `lib.rs`): 5 new commands registered: `set_eq_kill`, `set_eq_mode`, `seek_ms`, `get_auto_cues`, `submit_transition_feedback`.
+- **UI Updates** (`App.tsx` + `store.ts`): EQ kill buttons wired to `setEqKill` store action. AI debug panel shows reasoning tags as badges, confidence percentage, and action timeline preview (first 6 actions with kind + timestamp). All 7 transition templates in dropdown selector. `MixAction` interface + 5 new store actions added.

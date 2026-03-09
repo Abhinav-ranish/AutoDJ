@@ -31,6 +31,9 @@ const STATE_RING_SIZE: usize = 4;
 /// Max pending scheduled commands in the audio callback.
 const MAX_PENDING_COMMANDS: usize = 256;
 
+/// Number of spectrum analyzer bands.
+const SPECTRUM_BANDS: usize = 8;
+
 /// A read-only snapshot of engine state for the UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineStateSnapshot {
@@ -41,6 +44,22 @@ pub struct EngineStateSnapshot {
     pub beat_number: u64,
     pub bar_number: u64,
     pub sample_pos: u64,
+    /// RMS level of the master output (0.0 = silence, 1.0 = full scale)
+    #[serde(default)]
+    pub master_rms: f32,
+    /// Number of consecutive silent frames (RMS < threshold)
+    #[serde(default)]
+    pub silence_frames: u32,
+    /// Buffer underrun count (audio callback received empty data)
+    #[serde(default)]
+    pub underrun_count: u32,
+    /// 8-band spectrum analyzer levels (0.0–1.0 per band)
+    #[serde(default = "default_spectrum")]
+    pub spectrum: [f32; SPECTRUM_BANDS],
+}
+
+fn default_spectrum() -> [f32; SPECTRUM_BANDS] {
+    [0.0; SPECTRUM_BANDS]
 }
 
 /// Snapshot of a single deck's state.
@@ -65,10 +84,16 @@ pub struct DeckSnapshot {
     pub loop_start_ms: u64,
     pub loop_end_ms: u64,
     pub speed: f64,
+    /// Per-deck RMS level (0.0–1.0)
+    #[serde(default)]
+    pub rms: f32,
+    /// Per-deck peak level (0.0–1.0)
+    #[serde(default)]
+    pub peak: f32,
 }
 
 impl DeckSnapshot {
-    fn from_deck(deck: &Deck, sample_rate: u32) -> Self {
+    fn from_deck(deck: &Deck, sample_rate: u32, rms: f32, peak: f32) -> Self {
         let duration_ms = deck
             .track
             .as_ref()
@@ -113,6 +138,8 @@ impl DeckSnapshot {
             loop_start_ms,
             loop_end_ms,
             speed: deck.speed,
+            rms,
+            peak,
         }
     }
 }
@@ -241,6 +268,48 @@ impl AudioEngine {
         let mut rec_producer = record_producer;
         let rec_flag = recording_flag;
 
+        // Silence detection state
+        let mut rms_accumulator: f64 = 0.0;
+        let mut rms_frame_count: u64 = 0;
+        let mut current_rms: f32 = 0.0;
+        let mut silence_frame_counter: u32 = 0;
+        let underrun_counter: u32 = 0;
+        let silence_threshold: f32 = 0.0001; // ~-80 dB
+
+        // Per-deck level metering state
+        let mut deck_a_rms_acc: f64 = 0.0;
+        let mut deck_a_peak: f32 = 0.0;
+        let mut deck_b_rms_acc: f64 = 0.0;
+        let mut deck_b_peak: f32 = 0.0;
+        let mut deck_a_rms: f32 = 0.0;
+        let mut deck_a_pk: f32 = 0.0;
+        let mut deck_b_rms: f32 = 0.0;
+        let mut deck_b_pk: f32 = 0.0;
+
+        // 8-band spectrum analyzer state (biquad bandpass filters)
+        let band_freqs: [f32; SPECTRUM_BANDS] = [
+            32.0, 64.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0,
+        ];
+        let q = 1.4f32; // ~1 octave bandwidth
+        // Biquad state: [b0, b1, b2, a1, a2, x1, x2, y1, y2]
+        let mut band_state: [[f32; 9]; SPECTRUM_BANDS] = [[0.0; 9]; SPECTRUM_BANDS];
+        let mut band_energy: [f64; SPECTRUM_BANDS] = [0.0; SPECTRUM_BANDS];
+        let mut current_spectrum: [f32; SPECTRUM_BANDS] = [0.0; SPECTRUM_BANDS];
+
+        // Pre-compute biquad coefficients for each band
+        let sr_f = sample_rate as f32;
+        for (i, &freq) in band_freqs.iter().enumerate() {
+            let w0 = 2.0 * std::f32::consts::PI * freq / sr_f;
+            let alpha = w0.sin() / (2.0 * q);
+            let a0 = 1.0 + alpha;
+            band_state[i][0] = alpha / a0;       // b0
+            band_state[i][1] = 0.0;               // b1
+            band_state[i][2] = -alpha / a0;       // b2
+            band_state[i][3] = -2.0 * w0.cos() / a0; // a1
+            band_state[i][4] = (1.0 - alpha) / a0;   // a2
+            // x1, x2, y1, y2 start at 0
+        }
+
         let config = supported_config.config();
 
         let stream = device
@@ -326,6 +395,29 @@ impl AudioEngine {
                             frame[0] = (l + r) * 0.5;
                         }
 
+                        // Per-deck level metering
+                        deck_a_rms_acc += (a.0 * a.0 + a.1 * a.1) as f64 * 0.5;
+                        deck_a_peak = deck_a_peak.max(a.0.abs().max(a.1.abs()));
+                        deck_b_rms_acc += (b.0 * b.0 + b.1 * b.1) as f64 * 0.5;
+                        deck_b_peak = deck_b_peak.max(b.0.abs().max(b.1.abs()));
+
+                        // RMS accumulation for silence detection
+                        rms_accumulator += (l * l + r * r) as f64 * 0.5;
+                        rms_frame_count += 1;
+
+                        // 8-band spectrum analyzer: run mono master through bandpass filters
+                        let mono = (l + r) * 0.5;
+                        for i in 0..SPECTRUM_BANDS {
+                            let s = &mut band_state[i];
+                            let y = s[0] * mono + s[1] * s[5] + s[2] * s[6]
+                                  - s[3] * s[7] - s[4] * s[8];
+                            s[6] = s[5]; // x2 = x1
+                            s[5] = mono;  // x1 = x
+                            s[8] = s[7]; // y2 = y1
+                            s[7] = y;     // y1 = y
+                            band_energy[i] += (y * y) as f64;
+                        }
+
                         // Recording tap: push stereo samples to ring buffer
                         if let Some(ref flag) = rec_flag {
                             if flag.load(Ordering::Relaxed) {
@@ -341,14 +433,58 @@ impl AudioEngine {
 
                         // Emit state snapshot at ~30 Hz
                         if frame_counter.is_multiple_of(snapshot_interval) {
+                            // Compute RMS for this snapshot interval
+                            if rms_frame_count > 0 {
+                                current_rms = (rms_accumulator / rms_frame_count as f64).sqrt() as f32;
+                                if current_rms < silence_threshold {
+                                    silence_frame_counter = silence_frame_counter.saturating_add(1);
+                                } else {
+                                    silence_frame_counter = 0;
+                                }
+
+                                // Per-deck RMS (with peak hold and slow decay)
+                                deck_a_rms = (deck_a_rms_acc / rms_frame_count as f64).sqrt() as f32;
+                                deck_a_pk = deck_a_peak;
+                                deck_b_rms = (deck_b_rms_acc / rms_frame_count as f64).sqrt() as f32;
+                                deck_b_pk = deck_b_peak;
+
+                                // Spectrum: compute RMS per band and normalize
+                                let mut max_band: f64 = 0.0;
+                                for i in 0..SPECTRUM_BANDS {
+                                    let rms_val = (band_energy[i] / rms_frame_count as f64).sqrt();
+                                    current_spectrum[i] = rms_val as f32;
+                                    if rms_val > max_band {
+                                        max_band = rms_val;
+                                    }
+                                    band_energy[i] = 0.0;
+                                }
+                                // Normalize spectrum to 0.0–1.0 range
+                                if max_band > 0.0 {
+                                    for v in &mut current_spectrum {
+                                        *v = (*v as f64 / max_band).min(1.0) as f32;
+                                    }
+                                }
+
+                                rms_accumulator = 0.0;
+                                rms_frame_count = 0;
+                                deck_a_rms_acc = 0.0;
+                                deck_a_peak = 0.0;
+                                deck_b_rms_acc = 0.0;
+                                deck_b_peak = 0.0;
+                            }
+
                             let snapshot = EngineStateSnapshot {
-                                deck_a: DeckSnapshot::from_deck(&deck_a, sr),
-                                deck_b: DeckSnapshot::from_deck(&deck_b, sr),
+                                deck_a: DeckSnapshot::from_deck(&deck_a, sr, deck_a_rms, deck_a_pk),
+                                deck_b: DeckSnapshot::from_deck(&deck_b, sr, deck_b_rms, deck_b_pk),
                                 crossfader: mixer.crossfader,
                                 master_bpm: transport.bpm,
                                 beat_number: transport.beat_number,
                                 bar_number: transport.bar_number,
                                 sample_pos: transport.sample_pos,
+                                master_rms: current_rms,
+                                silence_frames: silence_frame_counter,
+                                underrun_count: underrun_counter,
+                                spectrum: current_spectrum,
                             };
                             let _ = state_prod.try_push(snapshot);
                         }
