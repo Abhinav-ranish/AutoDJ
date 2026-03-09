@@ -43,6 +43,14 @@ pub struct CurrentStateContext {
     pub transition_windows: Vec<TransitionWindow>,
     /// Phase 19: auto-generated cue points for AI mixing.
     pub auto_cues: Vec<AutoCue>,
+    /// Phase 50: Vocal risk level ("low" | "medium" | "high").
+    /// High means current track has strong vocals — avoid vocal-heavy next tracks.
+    pub vocal_risk_level: String,
+    /// Phase 50: Best upcoming transition window summary for easier LLM reasoning.
+    pub best_transition_window_ms: Option<u64>,
+    pub best_transition_window_anchor: Option<String>,
+    /// Phase 50: Whether current section is building, peaking, or declining.
+    pub section_momentum: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +64,10 @@ pub struct ConstraintsContext {
     pub max_bpm_difference: f64,
     pub allow_key_shift: bool,
     pub recent_tracks: Vec<String>,
+    /// Phase 50: last N transition templates used for anti-repetition guidance.
+    pub recent_templates: Vec<String>,
+    /// Phase 50: explicit reminder of which templates to avoid repeating.
+    pub avoid_templates: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +135,8 @@ pub struct ContextInput<'a> {
     pub intent: &'a str,
     pub target_energy: f64,
     pub recent_tracks: &'a [String],
+    /// Phase 50: recent transition templates for anti-repetition context.
+    pub recent_templates: &'a [String],
     pub available_metadata: &'a std::collections::HashMap<String, (String, String)>,
     pub classifications: &'a std::collections::HashMap<String, TrackClassificationData>,
     pub set_flow: Option<SetFlowContext>,
@@ -136,11 +150,18 @@ pub fn build_context(input: &ContextInput) -> AiContext {
 
     let deck_a_playing = engine_state.deck_a.state == "playing";
     let playing_deck = if deck_a_playing { "A" } else { "B" };
-    let deck_snapshot = if deck_a_playing { &engine_state.deck_a } else { &engine_state.deck_b };
+    let deck_snapshot = if deck_a_playing {
+        &engine_state.deck_a
+    } else {
+        &engine_state.deck_b
+    };
 
-    let time_remaining_ms = deck_snapshot.duration_ms.saturating_sub(deck_snapshot.position_ms);
+    let time_remaining_ms = deck_snapshot
+        .duration_ms
+        .saturating_sub(deck_snapshot.position_ms);
 
-    let playing_class = input.classifications
+    let playing_class = input
+        .classifications
         .get(&playing_track_profile.track_id)
         .cloned()
         .unwrap_or_default();
@@ -151,10 +172,14 @@ pub fn build_context(input: &ContextInput) -> AiContext {
         artist: input.playing_artist.to_string(),
         title: input.playing_title.to_string(),
         bpm: playing_track_profile.tempo.bpm,
-        perceived_tempo: playing_track_profile.perceived_tempo.as_ref()
+        perceived_tempo: playing_track_profile
+            .perceived_tempo
+            .as_ref()
             .map(|pt| pt.perceived_tempo)
             .unwrap_or(playing_track_profile.tempo.bpm),
-        groove_type: playing_track_profile.perceived_tempo.as_ref()
+        groove_type: playing_track_profile
+            .perceived_tempo
+            .as_ref()
             .map(|pt| pt.groove_type.clone())
             .unwrap_or_else(|| "standard".to_string()),
         key: playing_track_profile.key.camelot.clone(),
@@ -174,6 +199,43 @@ pub fn build_context(input: &ContextInput) -> AiContext {
         first_drop_ms: playing_track_profile.first_drop_ms,
         transition_windows: playing_track_profile.transition_windows.clone(),
         auto_cues: playing_track_profile.auto_cues.clone(),
+        // Phase 50: derived vocal risk
+        vocal_risk_level: {
+            let vp = playing_track_profile.vocal_presence.unwrap_or(0.0);
+            if vp > 0.7 {
+                "high".to_string()
+            } else if vp > 0.4 {
+                "medium".to_string()
+            } else {
+                "low".to_string()
+            }
+        },
+        // Phase 50: surface the best upcoming transition window directly
+        best_transition_window_ms: playing_track_profile
+            .transition_windows
+            .iter()
+            .filter(|w| w.start_ms > deck_snapshot.position_ms)
+            .max_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|w| w.start_ms),
+        best_transition_window_anchor: playing_track_profile
+            .transition_windows
+            .iter()
+            .filter(|w| w.start_ms > deck_snapshot.position_ms)
+            .max_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|w| w.anchor.clone()),
+        // Phase 50: section momentum
+        section_momentum: playing_track_profile
+            .energy_trajectory
+            .clone()
+            .unwrap_or_else(|| "stable".to_string()),
     };
 
     let preferences = PreferencesContext {
@@ -185,6 +247,15 @@ pub fn build_context(input: &ContextInput) -> AiContext {
         max_bpm_difference: 15.0,
         allow_key_shift: true,
         recent_tracks: input.recent_tracks.to_vec(),
+        // Phase 50: include recent templates so LLM avoids repeating them
+        recent_templates: input.recent_templates.to_vec(),
+        avoid_templates: input
+            .recent_templates
+            .iter()
+            .rev()
+            .take(2)
+            .cloned()
+            .collect(),
     };
 
     let available_tracks = available_profiles
@@ -195,7 +266,8 @@ pub fn build_context(input: &ContextInput) -> AiContext {
                 .cloned()
                 .unwrap_or_else(|| ("Unknown".to_string(), "Unknown".to_string()));
 
-            let class = input.classifications
+            let class = input
+                .classifications
                 .get(&p.track_id)
                 .cloned()
                 .unwrap_or_default();
@@ -205,10 +277,14 @@ pub fn build_context(input: &ContextInput) -> AiContext {
                 artist,
                 title,
                 bpm: p.tempo.bpm,
-                perceived_tempo: p.perceived_tempo.as_ref()
+                perceived_tempo: p
+                    .perceived_tempo
+                    .as_ref()
                     .map(|pt| pt.perceived_tempo)
                     .unwrap_or(p.tempo.bpm),
-                groove_type: p.perceived_tempo.as_ref()
+                groove_type: p
+                    .perceived_tempo
+                    .as_ref()
                     .map(|pt| pt.groove_type.clone())
                     .unwrap_or_else(|| "standard".to_string()),
                 key: p.key.camelot.clone(),

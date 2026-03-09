@@ -2,8 +2,8 @@
 //! Phases 31, 32, 35, 37, 38: Enhanced scoring with anti-repetition,
 //! groove similarity, tension/release, and variety memory.
 
-use crate::AiConfig;
 use crate::camelot::camelot_distance;
+use crate::AiConfig;
 use autodj_analysis::profile::TrackProfile;
 use std::cmp::Ordering;
 
@@ -14,6 +14,8 @@ pub struct ScoringCandidate<'a> {
     pub mood: Option<&'a str>,
     pub artist: Option<&'a str>,
     pub vibe: Option<&'a str>,
+    /// Phase 50: vocal presence for compatibility scoring.
+    pub vocal: Option<f64>,
 }
 
 /// DJ personality profile (Phase 35).
@@ -51,10 +53,15 @@ pub enum SetArcPhase {
 
 impl SetArcPhase {
     pub fn from_set_position(fraction: f64) -> Self {
-        if fraction < 0.15 { Self::Warmup }
-        else if fraction < 0.5 { Self::Groove }
-        else if fraction < 0.8 { Self::Peak }
-        else { Self::Cooldown }
+        if fraction < 0.15 {
+            Self::Warmup
+        } else if fraction < 0.5 {
+            Self::Groove
+        } else if fraction < 0.8 {
+            Self::Peak
+        } else {
+            Self::Cooldown
+        }
     }
 }
 
@@ -104,13 +111,19 @@ impl HeuristicScorer {
 
                 // Phase 37: Artist repetition penalty
                 if let Some(artist) = c.artist {
-                    if recent_artists.iter().any(|a| a.eq_ignore_ascii_case(artist)) {
+                    if recent_artists
+                        .iter()
+                        .any(|a| a.eq_ignore_ascii_case(artist))
+                    {
                         s *= 0.3; // heavy penalty for recent same artist
                     }
                 }
 
                 // Phase 37: Recently played penalty (distance-based)
-                if let Some(pos) = recent_tracks.iter().position(|id| *id == c.profile.track_id) {
+                if let Some(pos) = recent_tracks
+                    .iter()
+                    .position(|id| *id == c.profile.track_id)
+                {
                     let recency_penalty = 1.0 - (0.5 / (pos as f64 + 1.0));
                     s *= recency_penalty;
                 }
@@ -119,10 +132,34 @@ impl HeuristicScorer {
                 if let Some(ref arc) = arc_phase {
                     let energy = c.profile.energy.average;
                     let arc_bonus = match arc {
-                        SetArcPhase::Warmup => if energy < 0.5 { 0.15 } else { -0.1 },
-                        SetArcPhase::Groove => if energy > 0.4 && energy < 0.75 { 0.1 } else { 0.0 },
-                        SetArcPhase::Peak => if energy > 0.65 { 0.15 } else { -0.05 },
-                        SetArcPhase::Cooldown => if energy < 0.6 { 0.15 } else { -0.1 },
+                        SetArcPhase::Warmup => {
+                            if energy < 0.5 {
+                                0.15
+                            } else {
+                                -0.1
+                            }
+                        }
+                        SetArcPhase::Groove => {
+                            if energy > 0.4 && energy < 0.75 {
+                                0.1
+                            } else {
+                                0.0
+                            }
+                        }
+                        SetArcPhase::Peak => {
+                            if energy > 0.65 {
+                                0.15
+                            } else {
+                                -0.05
+                            }
+                        }
+                        SetArcPhase::Cooldown => {
+                            if energy < 0.6 {
+                                0.15
+                            } else {
+                                -0.1
+                            }
+                        }
                     };
                     s += arc_bonus;
                 }
@@ -131,12 +168,19 @@ impl HeuristicScorer {
                 if self.config.allow_replay {
                     if let Some(pos) = set_position {
                         if pos > 0.6 {
-                            let is_anthem = c.vibe.map(|v| {
-                                v.eq_ignore_ascii_case("anthem") || v.eq_ignore_ascii_case("peak_time")
-                            }).unwrap_or(false);
+                            let is_anthem = c
+                                .vibe
+                                .map(|v| {
+                                    v.eq_ignore_ascii_case("anthem")
+                                        || v.eq_ignore_ascii_case("peak_time")
+                                })
+                                .unwrap_or(false);
                             if is_anthem {
                                 // Check if it's a replay candidate (in recent but past cooldown)
-                                if let Some(track_pos) = recent_tracks.iter().position(|id| *id == c.profile.track_id) {
+                                if let Some(track_pos) = recent_tracks
+                                    .iter()
+                                    .position(|id| *id == c.profile.track_id)
+                                {
                                     if track_pos >= self.config.anthem_callback_distance {
                                         s += 0.15; // anthem callback bonus
                                     }
@@ -149,13 +193,23 @@ impl HeuristicScorer {
                 // Phase 35: Personality bias
                 match personality {
                     DjPersonality::Hype | DjPersonality::Festival => {
-                        if c.profile.energy.average > 0.7 { s += 0.05; }
+                        if c.profile.energy.average > 0.7 {
+                            s += 0.05;
+                        }
                     }
                     DjPersonality::Lounge => {
-                        if c.profile.energy.average < 0.5 { s += 0.05; }
+                        if c.profile.energy.average < 0.5 {
+                            s += 0.05;
+                        }
                     }
                     DjPersonality::Aggressive => {
-                        if c.mood.map(|m| m.eq_ignore_ascii_case("aggressive") || m.eq_ignore_ascii_case("dark")).unwrap_or(false) {
+                        if c.mood
+                            .map(|m| {
+                                m.eq_ignore_ascii_case("aggressive")
+                                    || m.eq_ignore_ascii_case("dark")
+                            })
+                            .unwrap_or(false)
+                        {
                             s += 0.08;
                         }
                     }
@@ -181,10 +235,14 @@ impl HeuristicScorer {
         let cur = current.profile;
         let cand = candidate.profile;
 
-        let current_tempo = cur.perceived_tempo.as_ref()
+        let current_tempo = cur
+            .perceived_tempo
+            .as_ref()
             .map(|pt| pt.perceived_tempo)
             .unwrap_or(cur.tempo.bpm);
-        let candidate_tempo = cand.perceived_tempo.as_ref()
+        let candidate_tempo = cand
+            .perceived_tempo
+            .as_ref()
             .map(|pt| pt.perceived_tempo)
             .unwrap_or(cand.tempo.bpm);
 
@@ -196,6 +254,8 @@ impl HeuristicScorer {
         let s_mood = self.score_mood(current.mood, candidate.mood);
         let s_spectral = self.score_spectral(cur.spectral.as_ref(), cand.spectral.as_ref());
         let s_vibe = self.score_vibe(current.vibe, candidate.vibe);
+        // Phase 50: vocal compatibility — penalise pairing two vocal-heavy tracks
+        let s_vocal = self.score_vocal_compatibility(current.vocal, candidate.vocal);
 
         (s_bpm * self.config.weight_tempo)
             + (s_key * self.config.weight_key)
@@ -205,6 +265,7 @@ impl HeuristicScorer {
             + (s_mood * self.config.weight_mood)
             + (s_spectral * self.config.weight_spectral)
             + (s_vibe * self.config.weight_vibe)
+            + (s_vocal * self.config.weight_vocal)
     }
 
     fn score_tempo(&self, bpm_a: f64, bpm_b: f64) -> f64 {
@@ -232,10 +293,34 @@ impl HeuristicScorer {
     fn score_energy(&self, energy_a: f64, energy_b: f64, intent: &str) -> f64 {
         let diff = energy_b - energy_a;
         match intent.to_lowercase().as_str() {
-            "build" => if diff > 0.0 && diff < 0.3 { 1.0 } else { 0.5 },
-            "drop" => if diff > 0.3 { 1.0 } else { 0.2 },
-            "relax" | "breakdown" => if diff < -0.1 { 1.0 } else { 0.3 },
-            _ => if diff.abs() < 0.15 { 1.0 } else { 0.5 },
+            "build" => {
+                if diff > 0.0 && diff < 0.3 {
+                    1.0
+                } else {
+                    0.5
+                }
+            }
+            "drop" => {
+                if diff > 0.3 {
+                    1.0
+                } else {
+                    0.2
+                }
+            }
+            "relax" | "breakdown" => {
+                if diff < -0.1 {
+                    1.0
+                } else {
+                    0.3
+                }
+            }
+            _ => {
+                if diff.abs() < 0.15 {
+                    1.0
+                } else {
+                    0.5
+                }
+            }
         }
     }
 
@@ -283,10 +368,15 @@ impl HeuristicScorer {
         match (spectral_a, spectral_b) {
             (Some(a), Some(b)) => {
                 // Centroid similarity (brightness)
-                let centroid_diff = (a.centroid - b.centroid).abs() / a.centroid.max(b.centroid).max(1.0);
-                let centroid_score = if centroid_diff < 0.1 { 0.6 }
-                    else if centroid_diff < 0.3 { 1.0 }
-                    else { 0.4 };
+                let centroid_diff =
+                    (a.centroid - b.centroid).abs() / a.centroid.max(b.centroid).max(1.0);
+                let centroid_score = if centroid_diff < 0.1 {
+                    0.6
+                } else if centroid_diff < 0.3 {
+                    1.0
+                } else {
+                    0.4
+                };
 
                 // Bass energy similarity (low-end character)
                 let bass_diff = (a.bass_energy - b.bass_energy).abs();
@@ -339,13 +429,36 @@ impl HeuristicScorer {
             _ => 0.5,
         }
     }
+    /// Phase 50: Penalise pairing two vocal-heavy tracks.
+    /// Returns a score in [0.0, 1.0]; lower = worse.
+    fn score_vocal_compatibility(&self, vocal_a: Option<f64>, vocal_b: Option<f64>) -> f64 {
+        match (vocal_a, vocal_b) {
+            (Some(a), Some(b)) => {
+                // Both vocal — scale penalty by how strongly vocal both tracks are
+                let overlap = (a - 0.5).max(0.0) * 2.0 * (b - 0.5).max(0.0) * 2.0;
+                1.0 - overlap.clamp(0.0, 0.9)
+            }
+            _ => 1.0, // missing data → neutral
+        }
+    }
 }
 
 /// Check if two genres belong to the same family.
 pub fn genres_related(a: &str, b: &str) -> bool {
     let groups: &[&[&str]] = &[
-        &["house", "deep house", "tech house", "progressive house", "electro house"],
-        &["techno", "minimal techno", "industrial techno", "acid techno"],
+        &[
+            "house",
+            "deep house",
+            "tech house",
+            "progressive house",
+            "electro house",
+        ],
+        &[
+            "techno",
+            "minimal techno",
+            "industrial techno",
+            "acid techno",
+        ],
         &["hip-hop", "trap", "drill", "boom bap", "lo-fi hip-hop"],
         &["drum-and-bass", "jungle", "breakbeat", "liquid dnb"],
         &["pop", "dance-pop", "electro-pop", "synth-pop"],
@@ -353,13 +466,18 @@ pub fn genres_related(a: &str, b: &str) -> bool {
         &["latin", "reggaeton", "afrobeats", "dancehall"],
         &["ambient", "downtempo", "chillout", "lo-fi"],
         &["dubstep", "riddim", "future bass", "bass music"],
-        &["trance", "psytrance", "progressive trance", "uplifting trance"],
+        &[
+            "trance",
+            "psytrance",
+            "progressive trance",
+            "uplifting trance",
+        ],
     ];
     let a_low = a.to_lowercase();
     let b_low = b.to_lowercase();
-    groups.iter().any(|group| {
-        group.iter().any(|g| *g == a_low) && group.iter().any(|g| *g == b_low)
-    })
+    groups
+        .iter()
+        .any(|group| group.iter().any(|g| *g == a_low) && group.iter().any(|g| *g == b_low))
 }
 
 /// Check if two moods are adjacent on the mood wheel.
@@ -449,13 +567,81 @@ mod tests {
         let config = crate::AiConfig::default();
         let scorer = HeuristicScorer::new(config);
 
-        let similar = SpectralProfile { centroid: 3000.0, flatness: 0.3, bass_energy: 0.6, mid_energy: 0.4, high_energy: 0.3 };
-        let very_diff = SpectralProfile { centroid: 8000.0, flatness: 0.9, bass_energy: 0.1, mid_energy: 0.2, high_energy: 0.8 };
+        let similar = SpectralProfile {
+            centroid: 3000.0,
+            flatness: 0.3,
+            bass_energy: 0.6,
+            mid_energy: 0.4,
+            high_energy: 0.3,
+        };
+        let very_diff = SpectralProfile {
+            centroid: 8000.0,
+            flatness: 0.9,
+            bass_energy: 0.1,
+            mid_energy: 0.2,
+            high_energy: 0.8,
+        };
 
         let score_similar = scorer.score_spectral(Some(&similar), Some(&similar));
         let score_different = scorer.score_spectral(Some(&similar), Some(&very_diff));
 
-        assert!(score_similar > score_different,
-            "Similar spectral profiles should score higher: {} vs {}", score_similar, score_different);
+        assert!(
+            score_similar > score_different,
+            "Similar spectral profiles should score higher: {} vs {}",
+            score_similar,
+            score_different
+        );
+    }
+
+    // Phase 50: Vocal compatibility tests
+    #[test]
+    fn test_vocal_compatibility_both_high() {
+        let config = crate::AiConfig::default();
+        let scorer = HeuristicScorer::new(config);
+        // Both tracks heavily vocal → should score low
+        let score = scorer.score_vocal_compatibility(Some(0.9), Some(0.9));
+        assert!(
+            score < 0.5,
+            "Dual high-vocal pairing should score below 0.5: got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_vocal_compatibility_one_instrumental() {
+        let config = crate::AiConfig::default();
+        let scorer = HeuristicScorer::new(config);
+        // Vocal track into instrumental → compatible
+        let score = scorer.score_vocal_compatibility(Some(0.8), Some(0.1));
+        assert!(
+            score > 0.9,
+            "Vocal → instrumental should score >0.9: got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_vocal_compatibility_both_low() {
+        let config = crate::AiConfig::default();
+        let scorer = HeuristicScorer::new(config);
+        // Both instrumental/low vocal → fine
+        let score = scorer.score_vocal_compatibility(Some(0.1), Some(0.2));
+        assert!(
+            score > 0.9,
+            "Both low-vocal should score >0.9: got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_vocal_compatibility_missing_data() {
+        let config = crate::AiConfig::default();
+        let scorer = HeuristicScorer::new(config);
+        // Missing data → neutral
+        let score = scorer.score_vocal_compatibility(None, Some(0.9));
+        assert!(
+            (score - 1.0).abs() < f64::EPSILON,
+            "Missing data should return 1.0 (neutral)"
+        );
     }
 }
