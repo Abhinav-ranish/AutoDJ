@@ -117,6 +117,18 @@ export interface LibraryFilters {
     sortOrder: "asc" | "desc";
 }
 
+export interface AiDebugInfo {
+    provider: string;
+    model: string;
+    deck_a_playing: boolean;
+    deck_b_playing: boolean;
+    deck_a_position_ms: number;
+    deck_b_position_ms: number;
+    last_decision: any | null;
+    personality: string;
+    recent_templates: string[];
+}
+
 interface DJStore {
     tracks: TrackRecord[];
     engineState: EngineState | null;
@@ -203,6 +215,24 @@ interface DJStore {
     autodjQueue: string[];  // ordered track IDs for AutoDJ playlist mode
     autodjQueueIndex: number;
     autodjShuffle: boolean;
+
+    // Phase 30: DJ Performance Controls
+    beatRepeat: (deck: string, beats: number) => Promise<void>;
+    beatRepeatOff: (deck: string) => Promise<void>;
+    setSlipMode: (deck: string, enabled: boolean) => Promise<void>;
+    vinylBrake: (deck: string, durationMs: number) => Promise<void>;
+    spinback: (deck: string, durationMs: number) => Promise<void>;
+    jumpToMarker: (deck: string, marker: string, positionMs: number) => Promise<void>;
+
+    // Phase 33/39: AI Debug & Health
+    testAiProvider: () => Promise<{ ok: boolean; message: string }>;
+    aiDebugInfo: AiDebugInfo | null;
+    getAiDebugInfo: () => Promise<void>;
+
+    // Phase 35: DJ Personality
+    djPersonality: string;
+    setDjPersonality: (personality: string) => void;
+
     fetchPlaylists: () => Promise<void>;
     createPlaylist: (name: string, description?: string) => Promise<string | null>;
     renamePlaylist: (playlistId: string, name: string) => Promise<void>;
@@ -257,6 +287,8 @@ export const useStore = create<DJStore>((set, get) => ({
     autodjQueue: [],
     autodjQueueIndex: 0,
     autodjShuffle: false,
+    aiDebugInfo: null,
+    djPersonality: "smooth",
 
     setErrorToast: (msg: string | null) => {
         set({ errorToast: msg });
@@ -846,5 +878,48 @@ export const useStore = create<DJStore>((set, get) => ({
             get().setErrorToast(`Failed to export cue sheet: ${e}`);
             return "";
         }
+    },
+
+    // Phase 30: DJ Performance Controls
+    beatRepeat: async (deck: string, beats: number) => {
+        try { await invoke("beat_repeat", { deck, beats }); } catch (e: any) { get().setErrorToast(`Beat repeat failed: ${e}`); }
+    },
+    beatRepeatOff: async (deck: string) => {
+        try { await invoke("beat_repeat_off", { deck }); } catch (e: any) { get().setErrorToast(`Beat repeat off failed: ${e}`); }
+    },
+    setSlipMode: async (deck: string, enabled: boolean) => {
+        try { await invoke("set_slip_mode", { deck, enabled }); } catch (e: any) { get().setErrorToast(`Slip mode failed: ${e}`); }
+    },
+    vinylBrake: async (deck: string, durationMs: number) => {
+        try { await invoke("vinyl_brake", { deck, durationMs }); } catch (e: any) { get().setErrorToast(`Vinyl brake failed: ${e}`); }
+    },
+    spinback: async (deck: string, durationMs: number) => {
+        try { await invoke("spinback", { deck, durationMs }); } catch (e: any) { get().setErrorToast(`Spinback failed: ${e}`); }
+    },
+    jumpToMarker: async (deck: string, marker: string, positionMs: number) => {
+        try { await invoke("jump_to_marker", { deck, marker, positionMs }); } catch (e: any) { get().setErrorToast(`Jump to marker failed: ${e}`); }
+    },
+
+    // Phase 33/39: AI Debug & Health
+    testAiProvider: async () => {
+        try {
+            const result = await invoke<{ ok: boolean; message: string }>("test_ai_provider");
+            return result;
+        } catch (e: any) {
+            return { ok: false, message: `${e}` };
+        }
+    },
+    getAiDebugInfo: async () => {
+        try {
+            const info = await invoke<AiDebugInfo>("get_ai_debug_info");
+            set({ aiDebugInfo: info });
+        } catch (e: any) {
+            console.error("Failed to get AI debug info", e);
+        }
+    },
+
+    // Phase 35: DJ Personality
+    setDjPersonality: (personality: string) => {
+        set({ djPersonality: personality });
     },
 }));
