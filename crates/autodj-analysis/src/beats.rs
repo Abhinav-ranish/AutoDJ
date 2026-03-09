@@ -111,7 +111,7 @@ fn fallback_synthetic_grid(samples: &[f32], sample_rate: u32, bpm: f64) -> BeatI
 }
 
 /// Compute onset strength envelope using spectral flux (half-wave rectified)
-fn compute_onset_envelope(samples: &[f32], sample_rate: u32) -> Vec<f32> {
+fn compute_onset_envelope(samples: &[f32], _sample_rate: u32) -> Vec<f32> {
     let mono_len = samples.len() / 2;
     if mono_len < ONSET_FFT_SIZE {
         return vec![];

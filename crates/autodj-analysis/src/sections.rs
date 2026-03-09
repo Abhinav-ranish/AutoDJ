@@ -386,6 +386,210 @@ pub fn generate_auto_cues(
     cues
 }
 
+// ─── Phase 49: Impact Moments & Best Mix Points ────────────────
+
+/// Phase 49: An impact moment — a sudden energy spike or drop.
+#[derive(Debug, Clone)]
+pub struct ImpactMoment {
+    /// Window index where the impact occurs.
+    pub window_idx: usize,
+    /// Magnitude of the energy change (positive = spike, negative = drop).
+    pub magnitude: f64,
+}
+
+/// Phase 49: Detect impact moments — sudden energy changes in the curve.
+///
+/// Returns indices where the energy derivative exceeds `threshold`,
+/// deduplicated so impacts within `dedup_windows` are merged (keeping largest).
+pub fn detect_impact_moments(
+    energy_curve: &[f64],
+    threshold: f64,
+    dedup_windows: usize,
+) -> Vec<ImpactMoment> {
+    if energy_curve.len() < 3 {
+        return Vec::new();
+    }
+
+    // Compute derivative (difference between consecutive windows)
+    let mut raw_impacts: Vec<ImpactMoment> = Vec::new();
+    for i in 1..energy_curve.len() {
+        let diff = energy_curve[i] - energy_curve[i - 1];
+        if diff.abs() >= threshold {
+            raw_impacts.push(ImpactMoment {
+                window_idx: i,
+                magnitude: diff,
+            });
+        }
+    }
+
+    // Deduplicate: within `dedup_windows` keep only the largest magnitude
+    let mut result: Vec<ImpactMoment> = Vec::new();
+    for impact in raw_impacts {
+        if let Some(last) = result.last_mut() {
+            if impact.window_idx.saturating_sub(last.window_idx) < dedup_windows {
+                // Within dedup range — keep the larger one
+                if impact.magnitude.abs() > last.magnitude.abs() {
+                    *last = impact;
+                }
+                continue;
+            }
+        }
+        result.push(impact);
+    }
+
+    result
+}
+
+/// Phase 49: Best mix point result.
+#[derive(Debug, Clone)]
+pub struct BestMixPoints {
+    /// Best position to start mixing INTO this track (ms).
+    pub mix_in_ms: Option<u64>,
+    pub mix_in_confidence: f64,
+    /// Best position to start mixing OUT of this track (ms).
+    pub mix_out_ms: Option<u64>,
+    pub mix_out_confidence: f64,
+}
+
+/// Phase 49: Compute the best mix-in and mix-out points for a track.
+///
+/// Mix-in: prefers vocal-free zones with low energy near the intro end, phrase-aligned.
+/// Mix-out: prefers positions near the outro, pre-decline, phrase-aligned.
+pub fn compute_best_mix_points(
+    sections: &[Section],
+    energy_curve: &[f64],
+    duration_ms: u64,
+    vocal_free_zones: &[(u64, u64)], // (start_ms, end_ms) pairs
+    phrases: &Option<PhraseInfo>,
+) -> BestMixPoints {
+    let ms_per_window = if !energy_curve.is_empty() && duration_ms > 0 {
+        duration_ms as f64 / energy_curve.len() as f64
+    } else {
+        500.0 // fallback
+    };
+
+    // ── Best mix-in ──
+    // Prefer: intro end or start of first non-intro section, vocal-free, low energy, phrase-aligned
+    let mut best_in_ms: Option<u64> = None;
+    let mut best_in_score: f64 = -1.0;
+
+    // Candidate positions: section boundaries in the first half of the track
+    let half_ms = duration_ms / 2;
+    for section in sections {
+        if section.start_ms > 0 && section.start_ms < half_ms {
+            let mut score = 0.5; // base
+
+            // Bonus for intro end / buildup start
+            if section.label == "buildup" || section.label == "body" || section.label == "drop" {
+                score += 0.2;
+            }
+
+            // Bonus for being in a vocal-free zone
+            if vocal_free_zones.iter().any(|&(s, e)| section.start_ms >= s && section.start_ms < e) {
+                score += 0.25;
+            }
+
+            // Bonus for low energy at this point
+            let idx = (section.start_ms as f64 / ms_per_window) as usize;
+            if idx < energy_curve.len() && energy_curve[idx] < 0.4 {
+                score += 0.15;
+            }
+
+            // Bonus for phrase alignment
+            if let Some(ref ph) = phrases {
+                if ph.boundaries_ms.iter().any(|&b| (b as i64 - section.start_ms as i64).unsigned_abs() < 2000) {
+                    score += 0.1;
+                }
+            }
+
+            if score > best_in_score {
+                best_in_score = score;
+                best_in_ms = Some(section.start_ms);
+            }
+        }
+    }
+
+    // Fallback: use the intro end if no section boundary scored well
+    if best_in_ms.is_none() {
+        if let Some(intro) = sections.iter().find(|s| s.label == "intro") {
+            best_in_ms = Some(intro.end_ms);
+            best_in_score = 0.4;
+        }
+    }
+
+    // ── Best mix-out ──
+    // Prefer: near outro, pre-decline section boundary, phrase-aligned
+    let mut best_out_ms: Option<u64> = None;
+    let mut best_out_score: f64 = -1.0;
+
+    for section in sections {
+        if section.start_ms > half_ms {
+            let mut score = 0.5;
+
+            if section.label == "outro" {
+                score += 0.3;
+            } else if section.label == "breakdown" {
+                score += 0.2;
+            }
+
+            // Bonus for vocal-free zone
+            if vocal_free_zones.iter().any(|&(s, e)| section.start_ms >= s && section.start_ms < e) {
+                score += 0.15;
+            }
+
+            // Bonus for energy decline at this point
+            let idx = (section.start_ms as f64 / ms_per_window) as usize;
+            if idx > 0 && idx < energy_curve.len() {
+                if energy_curve[idx] < energy_curve[idx.saturating_sub(1)] {
+                    score += 0.1;
+                }
+            }
+
+            // Phrase alignment
+            if let Some(ref ph) = phrases {
+                if ph.boundaries_ms.iter().any(|&b| (b as i64 - section.start_ms as i64).unsigned_abs() < 2000) {
+                    score += 0.1;
+                }
+            }
+
+            if score > best_out_score {
+                best_out_score = score;
+                best_out_ms = Some(section.start_ms);
+            }
+        }
+    }
+
+    // Fallback: use outro start
+    if best_out_ms.is_none() {
+        if let Some(outro) = sections.iter().find(|s| s.label == "outro") {
+            best_out_ms = Some(outro.start_ms);
+            best_out_score = 0.5;
+        }
+    }
+
+    BestMixPoints {
+        mix_in_ms: best_in_ms,
+        mix_in_confidence: best_in_score.max(0.0),
+        mix_out_ms: best_out_ms,
+        mix_out_confidence: best_out_score.max(0.0),
+    }
+}
+
+/// Phase 47: Compute the average energy for a given time range in the energy curve.
+pub fn section_average_energy(curve: &[f64], duration_ms: u64, start_ms: u64, end_ms: u64) -> f64 {
+    if curve.is_empty() || duration_ms == 0 || start_ms >= end_ms {
+        return 0.0;
+    }
+    let ms_per_window = duration_ms as f64 / curve.len() as f64;
+    let start_idx = (start_ms as f64 / ms_per_window) as usize;
+    let end_idx = ((end_ms as f64 / ms_per_window) as usize).min(curve.len());
+    if start_idx >= end_idx {
+        return 0.0;
+    }
+    let sum: f64 = curve[start_idx..end_idx].iter().sum();
+    sum / (end_idx - start_idx) as f64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,5 +680,74 @@ mod tests {
         assert!(types.contains(&"intro"));
         assert!(types.contains(&"drop"));
         assert!(types.contains(&"outro"));
+    }
+
+    // Phase 49 integration tests
+
+    #[test]
+    fn test_mix_in_prefers_vocal_free_zone() {
+        // Track: intro (0–30s), drop (30–90s, vocal-free), outro (150–180s)
+        let duration_ms = 180_000;
+        let sections = vec![
+            Section { label: "intro".into(), start_ms: 0, end_ms: 30_000, confidence: 0.7 },
+            Section { label: "drop".into(), start_ms: 30_000, end_ms: 150_000, confidence: 0.8 },
+            Section { label: "outro".into(), start_ms: 150_000, end_ms: 180_000, confidence: 0.7 },
+        ];
+        // Flat, mid-energy curve (36 windows × 5s)
+        let energy_curve: Vec<f64> = (0..36).map(|i| if i < 6 { 0.1 } else if i >= 30 { 0.2 } else { 0.7 }).collect();
+
+        // Vocal-free zone: 25s–55s (covers the drop start at 30s)
+        let vocal_free_ms: Vec<(u64, u64)> = vec![(25_000, 55_000)];
+
+        let result = compute_best_mix_points(
+            &sections,
+            &energy_curve,
+            duration_ms,
+            &vocal_free_ms,
+            &None,
+        );
+
+        // mix_in_ms should land inside the vocal-free zone
+        assert!(result.mix_in_ms.is_some(), "mix_in_ms should be detected");
+        let mix_in = result.mix_in_ms.unwrap();
+        assert!(
+            mix_in >= 25_000 && mix_in < 55_000,
+            "mix_in ({mix_in}ms) should be within vocal-free zone 25s–55s"
+        );
+        assert!(result.mix_in_confidence > 0.5, "confidence should be boosted by vocal-free zone");
+    }
+
+    #[test]
+    fn test_mix_out_lands_near_outro() {
+        let duration_ms = 240_000;
+        let sections = vec![
+            Section { label: "intro".into(), start_ms: 0, end_ms: 30_000, confidence: 0.7 },
+            Section { label: "drop".into(), start_ms: 60_000, end_ms: 150_000, confidence: 0.8 },
+            Section { label: "outro".into(), start_ms: 180_000, end_ms: 240_000, confidence: 0.9 },
+        ];
+        let energy_curve: Vec<f64> = (0..48)
+            .map(|i| if i < 6 || i >= 36 { 0.2 } else { 0.8 })
+            .collect();
+
+        let result = compute_best_mix_points(
+            &sections,
+            &energy_curve,
+            duration_ms,
+            &[],
+            &None,
+        );
+
+        assert!(result.mix_out_ms.is_some(), "mix_out_ms should be detected");
+        let mix_out = result.mix_out_ms.unwrap();
+        // Should land at or near the outro start (180s), within a 16-bar tolerance (~8s at 120bpm)
+        assert!(
+            mix_out >= 150_000,
+            "mix_out ({mix_out}ms) should be in the second half of the track"
+        );
+        assert!(
+            (mix_out as i64 - 180_000i64).unsigned_abs() < 30_000,
+            "mix_out ({mix_out}ms) should land near the outro start (180s)"
+        );
+        assert!(result.mix_out_confidence > 0.5, "confidence should reflect outro detection");
     }
 }

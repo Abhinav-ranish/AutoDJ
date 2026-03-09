@@ -8,9 +8,13 @@ use crate::loudness::analyze_loudness;
 use crate::perceived_tempo::analyze_perceived_tempo;
 use crate::profile::{EnergyInfo, RhythmProfile, SpectralProfile, TrackProfile};
 use crate::rhythm::analyze_rhythm;
-use crate::sections::{analyze_sections, build_phrase_grid, generate_auto_cues, generate_transition_windows};
+use crate::sections::{
+    analyze_sections, build_phrase_grid, compute_best_mix_points, detect_impact_moments,
+    generate_auto_cues, generate_transition_windows,
+};
 use crate::spectral::analyze_spectral;
-use crate::vocal_detection::detect_vocal_presence;
+use crate::vocal_detection::{detect_vocal_curve, detect_vocal_free_zones, detect_vocal_presence};
+use crate::profile::{AutoCue, TransitionWindow};
 use crate::waveform::analyze_waveform;
 use std::path::Path;
 
@@ -140,7 +144,7 @@ pub fn analyze_track(
     let perceived_tempo = analyze_perceived_tempo(samples, sample_rate, &tempo, &beat_info);
 
     // Phase 19: Generate transition windows, phrase grid, and auto-cues
-    let transition_windows = generate_transition_windows(
+    let mut transition_windows = generate_transition_windows(
         &sections,
         duration_ms,
         intro_length,
@@ -154,7 +158,82 @@ pub fn analyze_track(
         &beat_info.times_ms,
         8, // default 8-bar phrases
     ));
-    let auto_cues = generate_auto_cues(&sections, first_drop, &beat_info.times_ms);
+    let mut auto_cues = generate_auto_cues(&sections, first_drop, &beat_info.times_ms);
+
+    // Phase 49: Advanced auto-cueing & mix point intelligence
+    let bar_ms = if tempo.bpm > 0.0 { 60_000.0 / tempo.bpm * 4.0 } else { 2000.0 };
+    let vocal_curve = detect_vocal_curve(samples, sample_rate, energy_info.window_seconds);
+    let vocal_free_zones_raw = detect_vocal_free_zones(&vocal_curve, 0.15, 4);
+    let vocal_free_ms: Vec<(u64, u64)> = vocal_free_zones_raw
+        .iter()
+        .map(|z| (z.start_idx as u64 * window_ms, (z.end_idx as u64 * window_ms).min(duration_ms)))
+        .collect();
+    let impact_moments = detect_impact_moments(&energy_info.curve, 0.3, 3);
+    let best_mix = compute_best_mix_points(
+        &sections,
+        &energy_info.curve,
+        duration_ms,
+        &vocal_free_ms,
+        &phrases,
+    );
+
+    if let Some(pos) = best_mix.mix_in_ms {
+        auto_cues.push(AutoCue {
+            cue_type: "best_mix_in".to_string(),
+            position_ms: pos,
+            confidence: best_mix.mix_in_confidence,
+        });
+    }
+    if let Some(pos) = best_mix.mix_out_ms {
+        auto_cues.push(AutoCue {
+            cue_type: "best_mix_out".to_string(),
+            position_ms: pos,
+            confidence: best_mix.mix_out_confidence,
+        });
+        transition_windows.push(TransitionWindow {
+            anchor: "best_mix_out".to_string(),
+            start_ms: pos,
+            end_ms: (pos + (bar_ms * 4.0) as u64).min(duration_ms),
+            score: 0.9,
+        });
+    }
+    for zone in &vocal_free_zones_raw {
+        let vf_start = zone.start_idx as u64 * window_ms;
+        let vf_end = (zone.end_idx as u64 * window_ms).min(duration_ms);
+        auto_cues.push(AutoCue {
+            cue_type: "vocal_free_start".to_string(),
+            position_ms: vf_start,
+            confidence: 0.8,
+        });
+        auto_cues.push(AutoCue {
+            cue_type: "vocal_free_end".to_string(),
+            position_ms: vf_end,
+            confidence: 0.8,
+        });
+        transition_windows.push(TransitionWindow {
+            anchor: "vocal_free".to_string(),
+            start_ms: vf_start,
+            end_ms: vf_end,
+            score: 0.75,
+        });
+    }
+    for impact in &impact_moments {
+        let impact_ms = impact.window_idx as u64 * window_ms;
+        auto_cues.push(AutoCue {
+            cue_type: "impact".to_string(),
+            position_ms: impact_ms,
+            confidence: (impact.magnitude.abs()).min(1.0),
+        });
+        transition_windows.push(TransitionWindow {
+            anchor: "impact".to_string(),
+            start_ms: impact_ms,
+            end_ms: (impact_ms + (bar_ms * 2.0) as u64).min(duration_ms),
+            score: 0.55,
+        });
+    }
+    transition_windows.sort_by(|a, b| {
+        b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     Ok(TrackProfile {
         version: 1,
