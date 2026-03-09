@@ -77,6 +77,14 @@ pub fn run() {
             commands::get_playlist_tracks,
             commands::get_sessions,
             commands::export_cue_sheet,
+            commands::beat_repeat,
+            commands::beat_repeat_off,
+            commands::set_slip_mode,
+            commands::vinyl_brake,
+            commands::spinback,
+            commands::jump_to_marker,
+            commands::test_ai_provider,
+            commands::get_ai_debug_info,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

@@ -869,6 +869,134 @@ pub fn submit_transition_feedback(
     ).map_err(|e| format!("DB error: {e}"))
 }
 
+// ─── Phase 30: DJ Performance Engine ──────────────────────────
+
+/// Beat repeat: loop the current beat region.
+#[tauri::command]
+pub fn beat_repeat(deck: String, beats: f32, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::BeatRepeat { deck: deck_id, beats },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Stop beat repeat.
+#[tauri::command]
+pub fn beat_repeat_off(deck: String, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(Command::BeatRepeatOff { deck: deck_id }, CommandSource::User);
+    Ok(())
+}
+
+/// Toggle slip mode on a deck.
+#[tauri::command]
+pub fn set_slip_mode(deck: String, enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::SetSlipMode { deck: deck_id, enabled },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Vinyl brake effect.
+#[tauri::command]
+pub fn vinyl_brake(deck: String, duration_ms: u32, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::VinylBrake { deck: deck_id, duration_ms },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Spinback effect.
+#[tauri::command]
+pub fn spinback(deck: String, duration_ms: u32, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::Spinback { deck: deck_id, duration_ms },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Jump to a named marker position.
+#[tauri::command]
+pub fn jump_to_marker(deck: String, marker: String, position_ms: u64, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::JumpToMarker { deck: deck_id, marker, position_ms },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+// ─── Phase 33: AI Provider Health Check ─────────────────────
+
+/// Test the currently configured AI provider by sending a minimal request.
+#[tauri::command]
+pub async fn test_ai_provider(state: State<'_, AppState>) -> Result<String, String> {
+    let planner = state.ai_planner.read().await;
+    let config = planner.config().clone();
+    drop(planner);
+
+    if config.api_key.is_none() || config.api_key.as_deref() == Some("") {
+        return Err("No API key configured".to_string());
+    }
+
+    let client = autodj_ai::llm::LlmClient::new();
+    match client.query(
+        "You are a test assistant. Reply with exactly: {\"status\": \"ok\"}",
+        "health check",
+        &config,
+    ).await {
+        Ok(resp) => Ok(format!("Provider '{}' responded: {}", config.provider, resp)),
+        Err(e) => Err(format!("Provider '{}' failed: {}", config.provider, e)),
+    }
+}
+
+// ─── Phase 39: Debug & Explainability ───────────────────────
+
+/// Get detailed debug info about the last AI decision and planner state.
+#[tauri::command]
+pub async fn get_ai_debug_info(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let snapshot = state.latest_state().ok_or("Engine state unavailable")?;
+    let planner = state.ai_planner.read().await;
+    let config = planner.config().clone();
+    drop(planner);
+
+    let deck_a_playing = snapshot.deck_a.state == "playing";
+    let playing_deck = if deck_a_playing { "A" } else { "B" };
+    let playing_snap = if deck_a_playing { &snapshot.deck_a } else { &snapshot.deck_b };
+
+    Ok(serde_json::json!({
+        "provider": config.provider,
+        "model": config.model,
+        "enabled": config.enabled,
+        "has_api_key": config.api_key.is_some() && config.api_key.as_deref() != Some(""),
+        "playing_deck": playing_deck,
+        "position_ms": playing_snap.position_ms,
+        "duration_ms": playing_snap.duration_ms,
+        "position_fraction": playing_snap.position_fraction,
+        "master_bpm": snapshot.master_bpm,
+        "beat_number": snapshot.beat_number,
+        "bar_number": snapshot.bar_number,
+        "silence_frames": snapshot.silence_frames,
+        "crossfader": snapshot.crossfader,
+    }))
+}
+
+fn parse_deck(s: &str) -> Result<DeckId, String> {
+    match s.to_uppercase().as_str() {
+        "A" => Ok(DeckId::A),
+        "B" => Ok(DeckId::B),
+        _ => Err(format!("Invalid deck: {}", s)),
+    }
+}
+
 // ─── Preferences ──────────────────────────────────────────────
 
 /// Get a preference value.
