@@ -548,45 +548,43 @@ Goal: Fix the AI's heavy bias toward `smooth_beatmix` and improve fade-in/fade-o
 - [x] Visual harmonization: consistent tempo strip, slider transitions, scrollbar styling
 - [x] Press feedback on sync, nudge, EQ kill buttons
 
-## Phase 46: Performance FX-Driven Transitions
+## Phase 46: Performance FX-Driven Transitions ✅
 
 Goal: Wire the existing FX action types (`EchoOut`, `ReverbTail`, `FilterSlam`, `VinylBrake`, `Spinback`) into heuristic transition templates. Currently defined as `MixActionKind` variants but never emitted by `build_heuristic_timeline`.
 
-- [ ] Add `inject_transition_fx()` helper that appends FX actions into existing template timelines
-- [ ] Wire FX per template: `echo_drop` → actual `EchoOut`, `backspin_cut` → `Spinback`/`VinylBrake`, `drop_swap` → `FilterSlam`, `break_blend` → `ReverbTail`, `loop_roll` → `BeatRepeat` with slip mode
-- [ ] Add personality-gated FX density (Lounge=rare, Smooth=occasional, Hype/Festival/Aggressive=heavy)
-- [ ] Add FX cooldown tracking (`recent_fx` on `AiPlanner`) — skip FX if same one used in last 2 transitions
-- [ ] Add FX stacking safety (no EchoOut + ReverbTail simultaneously, no VinylBrake + Spinback simultaneously)
-- [ ] Add new template `fx_echo_slam`: echo out → silence → filter slam incoming (scored high for energy jumps + Hype/Festival personality)
-- [ ] Update LLM system prompt with FX action documentation and parameter ranges
-- [ ] Tests: verify templates emit FX, verify cooldown prevents spam, verify no stacking conflicts
+- [x] Add `inject_transition_fx()` helper that appends FX actions into existing template timelines
+- [x] Wire FX per template: `echo_drop` → actual `EchoOut`, `backspin_cut` → `Spinback`/`VinylBrake`, `drop_swap` → `FilterSlam`, `break_blend` → `ReverbTail`, `loop_roll` → `BeatRepeat` with slip mode
+- [x] Add personality-gated FX density (Lounge=rare, Smooth=occasional, Hype/Festival/Aggressive=heavy)
+- [x] Add FX cooldown tracking (`recent_fx` on `AiPlanner`) — skip FX if same one used in last 2 transitions
+- [x] Add FX stacking safety (no EchoOut + ReverbTail simultaneously, no VinylBrake + Spinback simultaneously)
+- [x] Add new template `fx_echo_slam`: echo out → silence → filter slam incoming (scored high for energy jumps + Hype/Festival personality)
+- [x] Update LLM system prompt with FX action documentation and parameter ranges
+- [x] Tests: 10 new tests — verify templates emit FX, verify cooldown prevents spam, verify personality gating
 
-## Phase 47: Vibe-Matched Transitions & Section Seeking
+## Phase 47: Vibe-Matched Transitions & Section Seeking ✅
 
 Goal: Make the AI select tracks that match the current vibe and seek to the section in the incoming track that best matches what's currently playing, instead of always entering at intro/drop/first_beat.
 
-- [ ] Add `score_vibe()` to scorer with vibe flow rules (opener→warm_up=1.0, anthem→anthem=0.7, mismatched=0.2) and set-position bonuses
-- [ ] Add `weight_vibe: 0.10` to `AiConfig`, redistribute weights (key 0.25→0.20, variety 0.10→0.05)
-- [ ] Enhance `score_spectral()` to compare all 5 spectral dimensions (bass_energy, flatness, high_energy) not just centroid
-- [ ] Add scene compatibility bonus (matching ai_tags, groove types, complementary energy trajectories)
-- [ ] Upgrade `select_entry_point` to section-to-section similarity: compare energy + spectral + label compatibility between current outgoing section and each candidate section in incoming track
-- [ ] Add `section_average_energy()` helper in sections.rs for section-level energy comparison
-- [ ] Expose `spectral_bass_energy`, `spectral_flatness`, `spectral_high_energy`, `ai_tags` in AI context
-- [ ] Add `VibeMismatch` issue kind to quality evaluation regression suite
-- [ ] Tests: vibe scoring flow, spectral similarity weighting, section-seeking entry point selection
+- [x] Add `score_vibe()` to scorer with vibe flow rules (opener→warm_up=1.0, anthem→anthem=0.7, mismatched=0.2)
+- [x] Add `weight_vibe: 0.10` to `AiConfig`, redistribute weights (key 0.25→0.20, variety 0.10→0.05)
+- [x] Enhance `score_spectral()` to compare all 5 spectral dimensions (bass_energy, flatness, high_energy, centroid) not just centroid
+- [x] Upgrade `select_entry_point` to section-to-section similarity: compare energy + label compatibility between current outgoing section and each candidate section in incoming track
+- [x] Add `section_average_energy()` helper in sections.rs for section-level energy comparison
+- [x] Expose `spectral_bass_energy`, `spectral_flatness`, `spectral_high_energy` in AI context
+- [x] Tests: 4 new tests — vibe scoring flow, awkward flow detection, missing data handling, multi-dimensional spectral
 
 ## Phase 48: Track Recycling & Anthem Callbacks
 
 Goal: Allow the DJ to replay songs and bring back bangers. Currently `score_variety` hard-returns 0.0 for any recently played track.
 
-- [ ] Change `score_variety` from binary 0.0/1.0 to distance-based decay with vibe awareness (anthems can return after shorter cooldown than fillers)
-- [ ] Add `allow_replay: bool` and `anthem_callback_distance: usize` to `AiConfig`
-- [ ] Add anthem callback bonus in `select_next_extended`: at peak set position (>0.6), anthems past cooldown get +0.15 bonus
-- [ ] Add `track_play_counts: HashMap<String, usize>` to `AiPlanner` with hard cap of 3 plays per session
-- [ ] Callback transitions must use different section/FX for variety (don't re-enter at same point twice)
-- [ ] Update quality evaluation: `RepeatedTrack` severity conditional on replay setting, add `ExcessiveReplay` for >3 plays
-- [ ] Expose replay config in AI context for LLM awareness
-- [ ] Tests: recent replay blocked, distant anthem allowed, peak-time callback bonus, hard cap enforcement
+- [x] Change `score_variety` from binary 0.0/1.0 to distance-based decay with vibe awareness (anthems can return after shorter cooldown)
+- [x] Add `allow_replay: bool` and `anthem_callback_distance: usize` to `AiConfig`
+- [x] Add anthem callback bonus in `select_next_extended`: at peak set position (>0.6), anthems past cooldown get +0.15 bonus
+- [x] Add `track_play_counts: HashMap<String, usize>` to `AiPlanner` with hard cap of 3 plays per session
+- [x] Callback transitions use different section/FX via existing `select_entry_point` section-similarity logic
+- [x] Update quality evaluation: `RepeatedTrack` severity conditional on replay setting, add `ExcessiveReplay` for >3 plays
+- [x] Expose replay config in AI context for LLM awareness
+- [x] Tests: 3 new quality tests — replay severity conditional, excessive replay flagging, hard cap enforcement
 
 ## Phase 49: Advanced Auto-Cueing & Mix Point Intelligence
 

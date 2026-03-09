@@ -11,6 +11,8 @@ pub struct SessionLog {
     pub track_ids: Vec<String>,
     pub templates_used: Vec<String>,
     pub artists: Vec<String>,
+    /// Phase 48: Whether replay was allowed during this session.
+    pub allow_replay: bool,
 }
 
 /// Quality scores for a DJ session (each 0.0–1.0).
@@ -44,6 +46,10 @@ pub enum IssueKind {
     LowDiversity,
     EnergyFlatline,
     NoHypeMoments,
+    /// Phase 47: Consecutive tracks have incompatible vibes.
+    VibeMismatch,
+    /// Phase 48: A track has been played more than 3 times in a session.
+    ExcessiveReplay,
 }
 
 /// Evaluate a session log and produce a quality report.
@@ -76,16 +82,31 @@ pub fn evaluate_session(log: &SessionLog) -> QualityReport {
 
     // ── Flow: check for repeated tracks and artists ──────────────
     let mut flow_penalty = 0.0;
-    let mut seen_tracks = std::collections::HashSet::new();
+    let mut track_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for (i, tid) in log.track_ids.iter().enumerate() {
-        if !seen_tracks.insert(tid.as_str()) {
+        let count = track_counts.entry(tid.as_str()).or_insert(0);
+        *count += 1;
+        if *count > 1 {
+            // Phase 48: Severity depends on whether replay is allowed
+            let severity = if log.allow_replay { 0.4 } else { 0.8 };
+            let penalty = if log.allow_replay { 0.1 } else { 0.2 };
             issues.push(QualityIssue {
                 kind: IssueKind::RepeatedTrack,
-                description: format!("Track '{}' played more than once", tid),
-                severity: 0.8,
+                description: format!("Track '{}' played {} times", tid, count),
+                severity,
                 at_decision_index: Some(i),
             });
-            flow_penalty += 0.2;
+            flow_penalty += penalty;
+        }
+        // Phase 48: Excessive replay (>3 plays) is always an issue
+        if *count > 3 {
+            issues.push(QualityIssue {
+                kind: IssueKind::ExcessiveReplay,
+                description: format!("Track '{}' played {} times (exceeds hard cap of 3)", tid, count),
+                severity: 1.0,
+                at_decision_index: Some(i),
+            });
+            flow_penalty += 0.3;
         }
     }
 
@@ -220,6 +241,7 @@ pub fn built_in_fixtures() -> Vec<RegressionFixture> {
                 track_ids: (0..10).map(|i| format!("track_{}", i)).collect(),
                 templates_used: vec!["smooth_beatmix".to_string(); 10],
                 artists: (0..10).map(|i| format!("artist_{}", i)).collect(),
+                allow_replay: false,
             },
         },
         RegressionFixture {
@@ -235,6 +257,7 @@ pub fn built_in_fixtures() -> Vec<RegressionFixture> {
                 track_ids: vec!["track_a".to_string(), "track_b".to_string(), "track_a".to_string()],
                 templates_used: vec!["smooth_beatmix".to_string(), "filter_sweep".to_string(), "drop_swap".to_string()],
                 artists: vec!["artist_1".to_string(), "artist_2".to_string(), "artist_1".to_string()],
+                allow_replay: false,
             },
         },
         RegressionFixture {
@@ -246,6 +269,7 @@ pub fn built_in_fixtures() -> Vec<RegressionFixture> {
                 track_ids: (0..5).map(|i| format!("track_{}", i)).collect(),
                 templates_used: vec!["smooth_beatmix".to_string(), "filter_sweep".to_string(), "drop_swap".to_string(), "echo_drop".to_string(), "loop_roll".to_string()],
                 artists: vec!["same_artist".to_string(), "other".to_string(), "another".to_string(), "same_artist".to_string(), "final".to_string()],
+                allow_replay: false,
             },
         },
     ]
@@ -326,9 +350,52 @@ mod tests {
                 "backspin_cut".to_string(), "loop_roll".to_string(),
             ],
             artists: (0..8).map(|i| format!("artist_{}", i)).collect(),
+            allow_replay: false,
         };
         let report = evaluate_session(&log);
         assert!(report.overall_score > 0.7, "Good session should score >0.7, got {}", report.overall_score);
         assert!(report.issues.is_empty(), "Good session should have no issues: {:?}", report.issues);
+    }
+
+    #[test]
+    fn test_replay_allowed_reduces_severity() {
+        let log = SessionLog {
+            decisions: vec![make_test_decision("prepare_next"); 3],
+            track_ids: vec!["track_a".to_string(), "track_b".to_string(), "track_a".to_string()],
+            templates_used: vec!["smooth_beatmix".to_string(), "filter_sweep".to_string(), "drop_swap".to_string()],
+            artists: vec!["a1".to_string(), "a2".to_string(), "a3".to_string()],
+            allow_replay: true,
+        };
+        let report = evaluate_session(&log);
+        let repeat_issue = report.issues.iter().find(|i| i.kind == IssueKind::RepeatedTrack).unwrap();
+        assert!((repeat_issue.severity - 0.4).abs() < 0.01, "Replay-allowed severity should be 0.4, got {}", repeat_issue.severity);
+    }
+
+    #[test]
+    fn test_replay_disallowed_high_severity() {
+        let log = SessionLog {
+            decisions: vec![make_test_decision("prepare_next"); 3],
+            track_ids: vec!["track_a".to_string(), "track_b".to_string(), "track_a".to_string()],
+            templates_used: vec!["smooth_beatmix".to_string(), "filter_sweep".to_string(), "drop_swap".to_string()],
+            artists: vec!["a1".to_string(), "a2".to_string(), "a3".to_string()],
+            allow_replay: false,
+        };
+        let report = evaluate_session(&log);
+        let repeat_issue = report.issues.iter().find(|i| i.kind == IssueKind::RepeatedTrack).unwrap();
+        assert!((repeat_issue.severity - 0.8).abs() < 0.01, "Replay-disallowed severity should be 0.8, got {}", repeat_issue.severity);
+    }
+
+    #[test]
+    fn test_excessive_replay_always_flagged() {
+        let log = SessionLog {
+            decisions: vec![make_test_decision("prepare_next"); 5],
+            track_ids: vec!["track_a".to_string(), "track_a".to_string(), "track_a".to_string(), "track_a".to_string(), "track_b".to_string()],
+            templates_used: vec!["smooth_beatmix".to_string(), "filter_sweep".to_string(), "drop_swap".to_string(), "echo_drop".to_string(), "loop_roll".to_string()],
+            artists: (0..5).map(|i| format!("artist_{}", i)).collect(),
+            allow_replay: true,
+        };
+        let report = evaluate_session(&log);
+        assert!(report.issues.iter().any(|i| i.kind == IssueKind::ExcessiveReplay),
+            "Should flag ExcessiveReplay when track played >3 times");
     }
 }

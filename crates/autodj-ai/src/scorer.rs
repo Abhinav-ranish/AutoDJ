@@ -127,6 +127,25 @@ impl HeuristicScorer {
                     s += arc_bonus;
                 }
 
+                // Phase 48: Anthem callback bonus at peak set position
+                if self.config.allow_replay {
+                    if let Some(pos) = set_position {
+                        if pos > 0.6 {
+                            let is_anthem = c.vibe.map(|v| {
+                                v.eq_ignore_ascii_case("anthem") || v.eq_ignore_ascii_case("peak_time")
+                            }).unwrap_or(false);
+                            if is_anthem {
+                                // Check if it's a replay candidate (in recent but past cooldown)
+                                if let Some(track_pos) = recent_tracks.iter().position(|id| *id == c.profile.track_id) {
+                                    if track_pos >= self.config.anthem_callback_distance {
+                                        s += 0.15; // anthem callback bonus
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Phase 35: Personality bias
                 match personality {
                     DjPersonality::Hype | DjPersonality::Festival => {
@@ -175,10 +194,8 @@ impl HeuristicScorer {
         let s_variety = self.score_variety(&cand.track_id, recent_tracks);
         let s_genre = self.score_genre(current.genre, candidate.genre);
         let s_mood = self.score_mood(current.mood, candidate.mood);
-        let s_spectral = self.score_spectral(
-            cur.spectral.as_ref().map(|s| s.centroid),
-            cand.spectral.as_ref().map(|s| s.centroid),
-        );
+        let s_spectral = self.score_spectral(cur.spectral.as_ref(), cand.spectral.as_ref());
+        let s_vibe = self.score_vibe(current.vibe, candidate.vibe);
 
         (s_bpm * self.config.weight_tempo)
             + (s_key * self.config.weight_key)
@@ -187,6 +204,7 @@ impl HeuristicScorer {
             + (s_genre * self.config.weight_genre)
             + (s_mood * self.config.weight_mood)
             + (s_spectral * self.config.weight_spectral)
+            + (s_vibe * self.config.weight_vibe)
     }
 
     fn score_tempo(&self, bpm_a: f64, bpm_b: f64) -> f64 {
@@ -221,8 +239,21 @@ impl HeuristicScorer {
         }
     }
 
+    /// Phase 48: Soft variety scoring with distance-based decay and anthem awareness.
     fn score_variety(&self, candidate_id: &str, recent_tracks: &[String]) -> f64 {
-        if recent_tracks.contains(&candidate_id.to_string()) { 0.0 } else { 1.0 }
+        if let Some(pos) = recent_tracks.iter().position(|id| id == candidate_id) {
+            if self.config.allow_replay {
+                // Distance-based decay: further back = higher score
+                let min_distance = self.config.anthem_callback_distance;
+                if pos >= min_distance {
+                    return 0.4 + 0.1 * ((pos - min_distance) as f64).min(6.0);
+                }
+                return 0.0; // too recent even with replay allowed
+            }
+            0.0 // replay not allowed
+        } else {
+            1.0
+        }
     }
 
     fn score_genre(&self, genre_a: Option<&str>, genre_b: Option<&str>) -> f64 {
@@ -243,14 +274,68 @@ impl HeuristicScorer {
         }
     }
 
-    fn score_spectral(&self, centroid_a: Option<f64>, centroid_b: Option<f64>) -> f64 {
-        match (centroid_a, centroid_b) {
+    /// Phase 47: Enhanced spectral scoring using all 5 dimensions, not just centroid.
+    fn score_spectral(
+        &self,
+        spectral_a: Option<&autodj_analysis::profile::SpectralProfile>,
+        spectral_b: Option<&autodj_analysis::profile::SpectralProfile>,
+    ) -> f64 {
+        match (spectral_a, spectral_b) {
             (Some(a), Some(b)) => {
-                let diff = (a - b).abs() / a.max(b).max(1.0);
-                if diff < 0.1 { 0.6 }
-                else if diff < 0.3 { 1.0 }
-                else { 0.4 }
+                // Centroid similarity (brightness)
+                let centroid_diff = (a.centroid - b.centroid).abs() / a.centroid.max(b.centroid).max(1.0);
+                let centroid_score = if centroid_diff < 0.1 { 0.6 }
+                    else if centroid_diff < 0.3 { 1.0 }
+                    else { 0.4 };
+
+                // Bass energy similarity (low-end character)
+                let bass_diff = (a.bass_energy - b.bass_energy).abs();
+                let bass_score = (1.0 - bass_diff * 2.0).clamp(0.3, 1.0);
+
+                // Flatness similarity (tonal vs noisy)
+                let flat_diff = (a.flatness - b.flatness).abs();
+                let flat_score = (1.0 - flat_diff * 3.0).clamp(0.3, 1.0);
+
+                // High-end similarity (brightness/air)
+                let high_diff = (a.high_energy - b.high_energy).abs();
+                let high_score = (1.0 - high_diff * 2.0).clamp(0.3, 1.0);
+
+                // Weighted combination: centroid still dominant, others refine
+                centroid_score * 0.4 + bass_score * 0.25 + flat_score * 0.15 + high_score * 0.2
             }
+            _ => 0.5,
+        }
+    }
+
+    /// Phase 47: Score vibe compatibility between current and candidate tracks.
+    fn score_vibe(&self, vibe_a: Option<&str>, vibe_b: Option<&str>) -> f64 {
+        match (vibe_a, vibe_b) {
+            (Some(a), Some(b)) => {
+                let a_low = a.to_lowercase();
+                let b_low = b.to_lowercase();
+                if a_low == b_low {
+                    // Same vibe — decent but not ideal (avoid monotony)
+                    return if a_low == "anthem" { 0.7 } else { 0.6 };
+                }
+                // Vibe flow rules
+                match (a_low.as_str(), b_low.as_str()) {
+                    ("opener", "warm_up" | "filler") => 1.0,
+                    ("warm_up", "filler" | "peak_time") => 1.0,
+                    ("filler", "anthem" | "peak_time") => 0.9,
+                    ("filler", "warm_up") => 0.8,
+                    ("anthem", "filler" | "peak_time") => 0.8,
+                    ("peak_time", "closer" | "filler") => 0.8,
+                    ("peak_time", "anthem") => 0.85,
+                    ("closer", "opener") => 0.5,
+                    // Awkward flows
+                    ("opener", "closer" | "anthem") => 0.2,
+                    ("closer", "peak_time" | "anthem") => 0.3,
+                    ("warm_up", "closer") => 0.2,
+                    // Default: moderate compatibility
+                    _ => 0.5,
+                }
+            }
+            // If vibe data is missing, neutral score
             _ => 0.5,
         }
     }
@@ -323,5 +408,54 @@ mod tests {
     fn test_genres_case_insensitive() {
         assert!(genres_related("House", "Deep House"));
         assert!(genres_related("TECHNO", "minimal techno"));
+    }
+
+    // Phase 47 tests
+
+    #[test]
+    fn test_vibe_scoring_natural_flow() {
+        let config = crate::AiConfig::default();
+        let scorer = HeuristicScorer::new(config);
+        // opener → warm_up should be ideal
+        assert!((scorer.score_vibe(Some("opener"), Some("warm_up")) - 1.0).abs() < f64::EPSILON);
+        // filler → anthem is strong
+        assert!(scorer.score_vibe(Some("filler"), Some("anthem")) > 0.8);
+        // anthem → anthem is decent but not 1.0
+        assert!((scorer.score_vibe(Some("anthem"), Some("anthem")) - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_vibe_scoring_awkward_flow() {
+        let config = crate::AiConfig::default();
+        let scorer = HeuristicScorer::new(config);
+        // opener → closer is bad
+        assert!(scorer.score_vibe(Some("opener"), Some("closer")) < 0.3);
+        // warm_up → closer is bad
+        assert!(scorer.score_vibe(Some("warm_up"), Some("closer")) < 0.3);
+    }
+
+    #[test]
+    fn test_vibe_scoring_missing_data() {
+        let config = crate::AiConfig::default();
+        let scorer = HeuristicScorer::new(config);
+        // Missing vibe should return neutral 0.5
+        assert!((scorer.score_vibe(None, Some("anthem")) - 0.5).abs() < f64::EPSILON);
+        assert!((scorer.score_vibe(Some("filler"), None) - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_spectral_multi_dimensional() {
+        use autodj_analysis::profile::SpectralProfile;
+        let config = crate::AiConfig::default();
+        let scorer = HeuristicScorer::new(config);
+
+        let similar = SpectralProfile { centroid: 3000.0, flatness: 0.3, bass_energy: 0.6, mid_energy: 0.4, high_energy: 0.3 };
+        let very_diff = SpectralProfile { centroid: 8000.0, flatness: 0.9, bass_energy: 0.1, mid_energy: 0.2, high_energy: 0.8 };
+
+        let score_similar = scorer.score_spectral(Some(&similar), Some(&similar));
+        let score_different = scorer.score_spectral(Some(&similar), Some(&very_diff));
+
+        assert!(score_similar > score_different,
+            "Similar spectral profiles should score higher: {} vs {}", score_similar, score_different);
     }
 }

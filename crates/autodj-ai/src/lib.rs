@@ -26,7 +26,7 @@ pub struct AiConfig {
     pub timeout_seconds: u32,
     pub prompt_template: Option<String>,
     
-    // Heuristic Weights (7 dimensions, should sum to ~1.0)
+    // Heuristic Weights (8 dimensions, should sum to ~1.0)
     pub weight_tempo: f64,
     pub weight_key: f64,
     pub weight_energy: f64,
@@ -34,10 +34,28 @@ pub struct AiConfig {
     pub weight_genre: f64,
     pub weight_mood: f64,
     pub weight_spectral: f64,
+    /// Phase 47: Weight for vibe compatibility scoring (opener/anthem/filler/etc.)
+    #[serde(default = "default_weight_vibe")]
+    pub weight_vibe: f64,
+
+    /// Phase 48: Allow replaying tracks in a set (anthem callbacks).
+    #[serde(default)]
+    pub allow_replay: bool,
+    /// Phase 48: Minimum number of tracks before an anthem can be replayed.
+    #[serde(default = "default_anthem_callback_distance")]
+    pub anthem_callback_distance: usize,
 }
 
 fn default_provider() -> String {
     "gemini".to_string()
+}
+
+fn default_weight_vibe() -> f64 {
+    0.10
+}
+
+fn default_anthem_callback_distance() -> usize {
+    5
 }
 
 impl Default for AiConfig {
@@ -51,12 +69,15 @@ impl Default for AiConfig {
             timeout_seconds: 5,
             prompt_template: None,
             weight_tempo: 0.20,
-            weight_key: 0.25,
+            weight_key: 0.20,
             weight_energy: 0.15,
-            weight_variety: 0.10,
+            weight_variety: 0.05,
             weight_genre: 0.15,
             weight_mood: 0.10,
             weight_spectral: 0.05,
+            weight_vibe: 0.10,
+            allow_replay: false,
+            anthem_callback_distance: 5,
         }
     }
 }

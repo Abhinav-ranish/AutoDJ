@@ -31,6 +31,7 @@ Analyze the current state, available tracks, and set flow to make the best mixin
 - bass_kill_swap: Blend mids/highs first, then swap bass at a beat boundary. Clean power swap, great for same-genre tracks.
 - break_blend: Gentle HP opening on incoming during outgoing's break/outro. Best for melodic or vocal-heavy transitions.- backspin_cut: Simulated backspin (rapid pitch sweep + filter close) → silence → hard cut. Stylistic flair for genre changes.
 - drop_ride: Ride both tracks through their drops simultaneously with bass swap. High energy, same-genre dual-drop blend.
+- fx_echo_slam: 4-bar echo out with feedback on outgoing → 1-bar silence → filter slam up on incoming. High impact for big energy jumps or genre changes.
 ## Section-Aware Timing
 - The current track has transition_windows: scored windows anchored to section boundaries.
   Use the highest-scored window whose start_ms is still in the future.
@@ -54,6 +55,13 @@ Action types:
   - set_crossfader: { position } — 0.0=A, 0.5=center, 1.0=B
   - play/pause: { deck }
   - execute_template: { template_name, params }
+  - echo_out: { deck, beats (1-8), feedback (0.0-0.8) } — echo/delay feedback effect on deck
+  - reverb_tail: { deck, decay_seconds (0.5-4.0) } — reverb wash on deck
+  - filter_slam: { deck, direction ("up"|"down") } — aggressive instant filter sweep
+  - vinyl_brake: { deck, duration_ms (100-5000) } — turntable brake slowdown
+  - spinback: { deck, duration_ms (100-5000) } — reverse scratch spin
+  - beat_repeat: { deck, beats (0.25-8) } — rhythmic loop stutter
+  - beat_repeat_off: { deck } — stop beat repeat
 If actions are present they override transition_plan.
 
 ## Safety Constraints
@@ -149,6 +157,10 @@ pub struct AiPlanner {
     recent_artists: Vec<String>,
     /// Phase 35: DJ personality profile.
     personality: DjPersonality,
+    /// Phase 46: Track recently used performance FX for cooldown.
+    recent_fx: Vec<String>,
+    /// Phase 48: Track how many times each track has been played in the session.
+    track_play_counts: std::collections::HashMap<String, usize>,
 }
 
 impl AiPlanner {
@@ -162,6 +174,8 @@ impl AiPlanner {
             recent_templates: Vec::new(),
             recent_artists: Vec::new(),
             personality: DjPersonality::Smooth,
+            recent_fx: Vec::new(),
+            track_play_counts: std::collections::HashMap::new(),
         }
     }
 
@@ -193,6 +207,25 @@ impl AiPlanner {
             self.recent_artists.remove(0);
         }
     }
+
+    /// Record a track play for replay tracking (Phase 48).
+    pub fn record_track_play(&mut self, track_id: &str) {
+        *self.track_play_counts.entry(track_id.to_string()).or_insert(0) += 1;
+    }
+
+    /// Check if a track has hit the hard replay cap (3 plays per session).
+    pub fn track_at_replay_cap(&self, track_id: &str) -> bool {
+        self.track_play_counts.get(track_id).copied().unwrap_or(0) >= 3
+    }
+
+    /// Record a used performance FX for cooldown (Phase 46).
+    pub fn record_fx_use(&mut self, fx_name: &str) {
+        self.recent_fx.push(fx_name.to_string());
+        if self.recent_fx.len() > 6 {
+            self.recent_fx.remove(0);
+        }
+    }
+
 
     /// Try to get a plan from the LLM. If it fails or is disabled, fallback to heuristics.
     pub async fn plan_next(
@@ -479,6 +512,21 @@ impl AiPlanner {
             if high_danceability { score += 0.1; }
             template_candidates.push(("drop_ride", score, vec!["drop_ride"]));
         }
+        // Phase 46: FxEchoSlam — echo out → silence → filter slam incoming
+        {
+            let mut score = 0.1;
+            if energy_jump > 0.25 { score += 0.35; }
+            if genre_change { score += 0.2; }
+            if near_drop && incoming_has_drop { score += 0.15; }
+            if bpm_diff > 8.0 { score += 0.1; }
+            // Personality boost for aggressive styles
+            match self.personality {
+                DjPersonality::Hype | DjPersonality::Festival | DjPersonality::Aggressive => { score += 0.15; }
+                DjPersonality::Lounge => { score -= 0.3; }
+                _ => {}
+            }
+            template_candidates.push(("fx_echo_slam", score, vec!["fx_echo_slam", "performance_fx"]));
+        }
 
         // Phase 31: Anti-repetition penalty — penalize recently used templates
         for tc in &mut template_candidates {
@@ -542,9 +590,14 @@ impl AiPlanner {
             template_candidates.remove(0)
         };
 
-        // ── Phase 32: Smart entry point selection ────────────────────────────
-        // Determine the best entry cue for the incoming track
-        let entry_marker = select_entry_point(next_track, template_name, energy_jump);
+        // ── Phase 32+47: Smart entry point selection with section similarity ─
+        let entry_marker = select_entry_point(
+            next_track,
+            template_name,
+            energy_jump,
+            Some(current_profile),
+            Some(now_ms),
+        );
 
         // Creative intensity based on personality + energy context
         let creative_intensity = match self.personality {
@@ -561,7 +614,15 @@ impl AiPlanner {
         let incoming_deck = if context.current_state.playing_deck == "A" { "B" } else { "A" };
         let outgoing_deck = context.current_state.playing_deck.clone();
 
-        // Phase 32: Determine incoming start position from entry point
+        // Phase 32+49: Determine incoming start position from entry point
+        let find_cue_ms = |cue_name: &str| -> u64 {
+            next_track
+                .auto_cues
+                .iter()
+                .find(|c| c.cue_type == cue_name)
+                .map(|c| c.position_ms)
+                .unwrap_or(0)
+        };
         let incoming_start_ms = match entry_marker.as_deref() {
             Some("drop") => next_track.first_drop_ms.unwrap_or(0),
             Some("break") => {
@@ -572,10 +633,14 @@ impl AiPlanner {
                 // Skip silence, start at first beat
                 next_track.intro_length_ms.unwrap_or(0).min(2000)
             }
+            // Phase 49 cue types
+            Some("best_mix_in") => find_cue_ms("best_mix_in"),
+            Some("vocal_free_start") => find_cue_ms("vocal_free_start"),
+            Some("impact") => find_cue_ms("impact"),
             _ => 0, // "intro" or default — start from beginning
         };
 
-        let actions = build_heuristic_timeline(
+        let mut actions = build_heuristic_timeline(
             template_name,
             &outgoing_deck,
             incoming_deck,
@@ -583,6 +648,17 @@ impl AiPlanner {
             bar_ms,
             next_track.tempo.bpm,
             incoming_start_ms,
+        );
+
+        // Phase 46: Inject performance FX into the timeline
+        inject_transition_fx(
+            &mut actions,
+            template_name,
+            &outgoing_deck,
+            incoming_deck,
+            bar_ms,
+            self.personality,
+            &self.recent_fx,
         );
 
         let arc_label = set_position.map(|p| {
@@ -620,20 +696,101 @@ impl AiPlanner {
     }
 }
 
-/// Phase 32: Select the best entry point for the incoming track based on
-/// template, energy delta, and available cue/section data.
-fn select_entry_point(track: &TrackProfile, template: &str, energy_jump: f64) -> Option<String> {
+/// Phase 32+47: Select the best entry point for the incoming track based on
+/// template, energy delta, section similarity, and available cue/section data.
+fn select_entry_point(
+    track: &TrackProfile,
+    template: &str,
+    energy_jump: f64,
+    current_profile: Option<&TrackProfile>,
+    current_elapsed_ms: Option<u64>,
+) -> Option<String> {
     let has_drop = track.first_drop_ms.is_some();
     let has_intro = track.intro_length_ms.is_some();
 
+    // Helper: check if incoming track has a given cue type
+    let has_cue = |cue_name: &str| track.auto_cues.iter().any(|c| c.cue_type == cue_name);
+
+    // Template-driven overrides (these are always respected)
     match template {
-        "drop_swap" | "drop_ride" if has_drop => Some("drop".to_string()),
-        "break_blend" => Some("intro".to_string()),
-        "echo_drop" if has_drop && energy_jump > 0.2 => Some("drop".to_string()),
-        _ if energy_jump > 0.25 && has_drop => Some("drop".to_string()),
-        _ if has_intro => Some("intro".to_string()),
-        _ => Some("first_beat".to_string()),
+        // Phase 49: prefer impact cues for drop-style templates if available
+        "drop_swap" | "drop_ride" if has_cue("impact") => return Some("impact".to_string()),
+        "drop_swap" | "drop_ride" if has_drop => return Some("drop".to_string()),
+        "echo_drop" if has_cue("impact") && energy_jump > 0.2 => return Some("impact".to_string()),
+        "echo_drop" if has_drop && energy_jump > 0.2 => return Some("drop".to_string()),
+        "fx_echo_slam" if has_drop => return Some("drop".to_string()),
+        "break_blend" => return Some("intro".to_string()),
+        _ => {}
     }
+
+    // Phase 49: If outgoing track has high vocal presence, prefer a vocal-free entry
+    if let Some(cur_prof) = current_profile {
+        if cur_prof.vocal_presence.unwrap_or(0.0) > 0.5 && has_cue("vocal_free_start") {
+            return Some("vocal_free_start".to_string());
+        }
+    }
+
+    // Phase 49: Prefer best_mix_in if the incoming track has one
+    if has_cue("best_mix_in") {
+        return Some("best_mix_in".to_string());
+    }
+
+    // Phase 47: Section-to-section similarity matching
+    if let (Some(cur_prof), Some(elapsed)) = (current_profile, current_elapsed_ms) {
+        if !track.sections.is_empty() && !cur_prof.sections.is_empty() {
+            // Find what section the outgoing track is currently in
+            let current_section = cur_prof.sections.iter()
+                .find(|s| elapsed >= s.start_ms && elapsed < s.end_ms);
+
+            if let Some(cur_section) = current_section {
+                let cur_energy = autodj_analysis::sections::section_average_energy(
+                    &cur_prof.energy.curve, cur_prof.duration_ms,
+                    cur_section.start_ms, cur_section.end_ms,
+                );
+
+                // Score each section in the incoming track
+                let mut best_entry: Option<(&str, f64)> = None;
+                for section in &track.sections {
+                    let sec_energy = autodj_analysis::sections::section_average_energy(
+                        &track.energy.curve, track.duration_ms,
+                        section.start_ms, section.end_ms,
+                    );
+
+                    // Energy similarity (0-1)
+                    let energy_sim = 1.0 - (cur_energy - sec_energy).abs();
+                    // Label compatibility (some combos work better)
+                    let label_bonus = match (cur_section.label.as_str(), section.label.as_str()) {
+                        ("outro", "intro") => 0.3,
+                        ("drop", "drop") => 0.25,
+                        ("breakdown", "breakdown") | ("breakdown", "intro") => 0.2,
+                        ("body", "body") => 0.1,
+                        ("drop", "intro") | ("body", "intro") => 0.05,
+                        _ => 0.0,
+                    };
+
+                    let score = energy_sim * 0.6 + label_bonus + section.confidence * 0.1;
+                    if best_entry.map(|(_, s)| score > s).unwrap_or(true) {
+                        let label = match section.label.as_str() {
+                            "intro" => "intro",
+                            "drop" => "drop",
+                            "breakdown" => "break",
+                            _ => "first_beat",
+                        };
+                        best_entry = Some((label, score));
+                    }
+                }
+
+                if let Some((label, _)) = best_entry {
+                    return Some(label.to_string());
+                }
+            }
+        }
+    }
+
+    // Fallback: energy-based heuristic
+    if energy_jump > 0.25 && has_drop { Some("drop".to_string()) }
+    else if has_intro { Some("intro".to_string()) }
+    else { Some("first_beat".to_string()) }
 }
 
 /// S-curve for perceptually smooth fades: 0→1 with gentle start and end.
@@ -859,6 +1016,24 @@ fn build_heuristic_timeline(
             actions.push(MixAction { at_ms: end, kind: MixActionKind::SetEqKill { deck: out.clone(), band: "low".into(), enabled: false } });
             actions.push(MixAction { at_ms: end, kind: MixActionKind::Pause { deck: out.clone() } });
         }
+        "fx_echo_slam" => {
+            // Phase 46: 4-bar echo out → 1-bar silence → filter slam incoming with hard cut
+            let echo_bars: u64 = 4;
+            // Echo out on outgoing with increasing feedback feel (exponential gain fade)
+            actions.push(MixAction { at_ms: 0, kind: MixActionKind::EchoOut { deck: out.clone(), beats: 4.0, feedback: 0.65 } });
+            for i in 0..=(echo_bars * 4) {
+                let t = i * (bar_ms / 4);
+                let frac = i as f32 / (echo_bars * 4) as f32;
+                let out_gain = -48.0 * frac * frac;
+                actions.push(MixAction { at_ms: t, kind: MixActionKind::SetGain { deck: out.clone(), gain_db: out_gain } });
+            }
+            let silence_at = echo_bars * bar_ms;
+            actions.push(MixAction { at_ms: silence_at, kind: MixActionKind::Pause { deck: out.clone() } });
+            // After 1-bar silence, filter slam on incoming + hard cut to full volume
+            let slam_at = (echo_bars + 1) * bar_ms;
+            actions.push(MixAction { at_ms: slam_at, kind: MixActionKind::FilterSlam { deck: inc.clone(), direction: "up".to_string() } });
+            actions.push(MixAction { at_ms: slam_at, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: 0.0 } });
+        }
         _ => {
             // Unknown template — just execute it directly
             actions.push(MixAction {
@@ -872,4 +1047,296 @@ fn build_heuristic_timeline(
     }
 
     actions
+}
+
+/// Phase 46: Get FX density for a DJ personality (0.0 = no FX, 1.0 = maximum FX).
+fn fx_density_for_personality(personality: DjPersonality) -> f64 {
+    match personality {
+        DjPersonality::Lounge => 0.1,
+        DjPersonality::Smooth => 0.3,
+        DjPersonality::OpenFormat => 0.6,
+        DjPersonality::Hype => 0.8,
+        DjPersonality::Festival | DjPersonality::Aggressive => 1.0,
+    }
+}
+
+/// Phase 46: Inject performance FX into an existing action timeline based on
+/// template type, DJ personality, and FX cooldown state.
+fn inject_transition_fx(
+    actions: &mut Vec<MixAction>,
+    template: &str,
+    outgoing: &str,
+    incoming: &str,
+    bar_ms: u64,
+    personality: DjPersonality,
+    recent_fx: &[String],
+) {
+    let density = fx_density_for_personality(personality);
+    let out = outgoing.to_string();
+    let inc = incoming.to_string();
+
+    // Deterministic "randomness" based on bar_ms to decide if FX fires
+    let fx_roll = (bar_ms % 100) as f64 / 100.0;
+    if fx_roll > density {
+        return; // Skip FX for this transition based on personality density
+    }
+
+    // Helper: check if an FX was used in last 2 transitions
+    let on_cooldown = |fx_name: &str| -> bool {
+        recent_fx.iter().rev().take(2).any(|f| f == fx_name)
+    };
+
+    match template {
+        "echo_drop" => {
+            // Add actual EchoOut FX to the exponential fade
+            if !on_cooldown("echo_out") {
+                let echo_start = bar_ms; // Start echo 1 bar in
+                actions.push(MixAction {
+                    at_ms: echo_start,
+                    kind: MixActionKind::EchoOut { deck: out, beats: 4.0, feedback: 0.6 },
+                });
+            }
+        }
+        "backspin_cut" => {
+            // Add Spinback (aggressive) or VinylBrake (smooth) before the pause
+            let fx_at = bar_ms; // 1 bar into the spin
+            match personality {
+                DjPersonality::Aggressive | DjPersonality::Hype | DjPersonality::Festival => {
+                    if !on_cooldown("spinback") {
+                        actions.push(MixAction {
+                            at_ms: fx_at,
+                            kind: MixActionKind::Spinback { deck: out, duration_ms: (bar_ms * 2) as u32 },
+                        });
+                    }
+                }
+                _ => {
+                    if !on_cooldown("vinyl_brake") {
+                        actions.push(MixAction {
+                            at_ms: fx_at,
+                            kind: MixActionKind::VinylBrake { deck: out, duration_ms: (bar_ms * 2) as u32 },
+                        });
+                    }
+                }
+            }
+        }
+        "drop_swap" => {
+            // FilterSlam on incoming at the cut point for impact
+            if !on_cooldown("filter_slam") {
+                // Find the cut point (where outgoing pauses)
+                let cut_at = 4 * bar_ms;
+                actions.push(MixAction {
+                    at_ms: cut_at,
+                    kind: MixActionKind::FilterSlam { deck: inc, direction: "up".to_string() },
+                });
+            }
+        }
+        "loop_roll" => {
+            // Replace SetLoop with BeatRepeat + SlipMode for tighter stutter
+            if !on_cooldown("beat_repeat") {
+                actions.push(MixAction {
+                    at_ms: 0,
+                    kind: MixActionKind::SetSlipMode { deck: out.clone(), enabled: true },
+                });
+                actions.push(MixAction {
+                    at_ms: 0,
+                    kind: MixActionKind::BeatRepeat { deck: out.clone(), beats: 4.0 },
+                });
+                actions.push(MixAction {
+                    at_ms: 4 * bar_ms,
+                    kind: MixActionKind::BeatRepeat { deck: out.clone(), beats: 2.0 },
+                });
+                actions.push(MixAction {
+                    at_ms: 6 * bar_ms,
+                    kind: MixActionKind::BeatRepeat { deck: out.clone(), beats: 1.0 },
+                });
+                // Cleanup at cut point
+                let cut_at = 7 * bar_ms;
+                actions.push(MixAction {
+                    at_ms: cut_at,
+                    kind: MixActionKind::BeatRepeatOff { deck: out.clone() },
+                });
+                actions.push(MixAction {
+                    at_ms: cut_at,
+                    kind: MixActionKind::SetSlipMode { deck: out, enabled: false },
+                });
+            }
+        }
+        "break_blend" => {
+            // Add ReverbTail on outgoing for a spacious exit
+            if !on_cooldown("reverb_tail") {
+                let reverb_start = 4 * bar_ms; // Start reverb at 1/3 point
+                actions.push(MixAction {
+                    at_ms: reverb_start,
+                    kind: MixActionKind::ReverbTail { deck: out, decay_seconds: 2.0 },
+                });
+            }
+        }
+        "drop_ride" => {
+            // FilterSlam on outgoing at the bass swap point for emphasis
+            if !on_cooldown("filter_slam") {
+                let swap_bar = 2;
+                actions.push(MixAction {
+                    at_ms: swap_bar * bar_ms,
+                    kind: MixActionKind::FilterSlam { deck: out, direction: "down".to_string() },
+                });
+            }
+        }
+        // fx_echo_slam already has FX baked into its template — no injection needed
+        // smooth_beatmix and bass_kill_swap are intentionally FX-free
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_bar_ms(bpm: f64) -> u64 {
+        let beat_ms = (60_000.0 / bpm) as u64;
+        beat_ms * 4
+    }
+
+    #[test]
+    fn test_echo_drop_emits_echo_out_fx() {
+        let bar_ms = make_bar_ms(128.0);
+        let mut actions = build_heuristic_timeline(
+            "echo_drop", "A", "B", "track_1", bar_ms, 128.0, 0,
+        );
+        inject_transition_fx(
+            &mut actions, "echo_drop", "A", "B", bar_ms,
+            DjPersonality::Hype, &[],
+        );
+        let has_echo = actions.iter().any(|a| matches!(&a.kind, MixActionKind::EchoOut { .. }));
+        assert!(has_echo, "echo_drop template should emit EchoOut FX");
+    }
+
+    #[test]
+    fn test_backspin_cut_emits_spinback_or_brake() {
+        let bar_ms = make_bar_ms(128.0);
+        let mut actions = build_heuristic_timeline(
+            "backspin_cut", "A", "B", "track_1", bar_ms, 128.0, 0,
+        );
+        inject_transition_fx(
+            &mut actions, "backspin_cut", "A", "B", bar_ms,
+            DjPersonality::Aggressive, &[],
+        );
+        let has_spinback = actions.iter().any(|a| matches!(&a.kind, MixActionKind::Spinback { .. }));
+        let has_brake = actions.iter().any(|a| matches!(&a.kind, MixActionKind::VinylBrake { .. }));
+        assert!(has_spinback || has_brake, "backspin_cut should emit Spinback or VinylBrake");
+    }
+
+    #[test]
+    fn test_backspin_cut_lounge_uses_vinyl_brake() {
+        let bar_ms = make_bar_ms(120.0);
+        let mut actions = build_heuristic_timeline(
+            "backspin_cut", "A", "B", "track_1", bar_ms, 120.0, 0,
+        );
+        inject_transition_fx(
+            &mut actions, "backspin_cut", "A", "B", bar_ms,
+            DjPersonality::Lounge, &[],
+        );
+        // Lounge density is 0.1 — bar_ms for 120 BPM = 2000ms, 2000 % 100 = 0, 0/100 = 0.0 ≤ 0.1
+        let has_brake = actions.iter().any(|a| matches!(&a.kind, MixActionKind::VinylBrake { .. }));
+        assert!(has_brake, "Lounge personality should prefer VinylBrake over Spinback");
+    }
+
+    #[test]
+    fn test_fx_cooldown_prevents_spam() {
+        let bar_ms = make_bar_ms(128.0);
+        let recent_fx = vec!["echo_out".to_string(), "echo_out".to_string()];
+        let mut actions = build_heuristic_timeline(
+            "echo_drop", "A", "B", "track_1", bar_ms, 128.0, 0,
+        );
+        inject_transition_fx(
+            &mut actions, "echo_drop", "A", "B", bar_ms,
+            DjPersonality::Hype, &recent_fx,
+        );
+        let echo_count = actions.iter().filter(|a| matches!(&a.kind, MixActionKind::EchoOut { .. })).count();
+        assert_eq!(echo_count, 0, "EchoOut should be skipped when on cooldown");
+    }
+
+    #[test]
+    fn test_drop_swap_emits_filter_slam() {
+        let bar_ms = make_bar_ms(128.0);
+        let mut actions = build_heuristic_timeline(
+            "drop_swap", "A", "B", "track_1", bar_ms, 128.0, 0,
+        );
+        inject_transition_fx(
+            &mut actions, "drop_swap", "A", "B", bar_ms,
+            DjPersonality::Festival, &[],
+        );
+        let has_slam = actions.iter().any(|a| matches!(&a.kind, MixActionKind::FilterSlam { .. }));
+        assert!(has_slam, "drop_swap should emit FilterSlam on incoming");
+    }
+
+    #[test]
+    fn test_fx_echo_slam_template_has_echo_and_slam() {
+        let bar_ms = make_bar_ms(128.0);
+        let actions = build_heuristic_timeline(
+            "fx_echo_slam", "A", "B", "track_1", bar_ms, 128.0, 0,
+        );
+        let has_echo = actions.iter().any(|a| matches!(&a.kind, MixActionKind::EchoOut { .. }));
+        let has_slam = actions.iter().any(|a| matches!(&a.kind, MixActionKind::FilterSlam { .. }));
+        assert!(has_echo, "fx_echo_slam should contain EchoOut");
+        assert!(has_slam, "fx_echo_slam should contain FilterSlam");
+    }
+
+    #[test]
+    fn test_loop_roll_emits_beat_repeat() {
+        let bar_ms = make_bar_ms(128.0);
+        let mut actions = build_heuristic_timeline(
+            "loop_roll", "A", "B", "track_1", bar_ms, 128.0, 0,
+        );
+        inject_transition_fx(
+            &mut actions, "loop_roll", "A", "B", bar_ms,
+            DjPersonality::Hype, &[],
+        );
+        let has_repeat = actions.iter().any(|a| matches!(&a.kind, MixActionKind::BeatRepeat { .. }));
+        let has_slip = actions.iter().any(|a| matches!(&a.kind, MixActionKind::SetSlipMode { .. }));
+        assert!(has_repeat, "loop_roll should emit BeatRepeat FX");
+        assert!(has_slip, "loop_roll should enable SlipMode for BeatRepeat");
+    }
+
+    #[test]
+    fn test_break_blend_emits_reverb_tail() {
+        let bar_ms = make_bar_ms(120.0);
+        let mut actions = build_heuristic_timeline(
+            "break_blend", "A", "B", "track_1", bar_ms, 120.0, 0,
+        );
+        inject_transition_fx(
+            &mut actions, "break_blend", "A", "B", bar_ms,
+            DjPersonality::Smooth, &[],
+        );
+        // Smooth density = 0.3, bar_ms for 120 BPM = 2000, 2000 % 100 = 0, 0.0 ≤ 0.3
+        let has_reverb = actions.iter().any(|a| matches!(&a.kind, MixActionKind::ReverbTail { .. }));
+        assert!(has_reverb, "break_blend should emit ReverbTail for Smooth personality");
+    }
+
+    #[test]
+    fn test_smooth_beatmix_no_fx() {
+        let bar_ms = make_bar_ms(128.0);
+        let mut actions = build_heuristic_timeline(
+            "smooth_beatmix", "A", "B", "track_1", bar_ms, 128.0, 0,
+        );
+        inject_transition_fx(
+            &mut actions, "smooth_beatmix", "A", "B", bar_ms,
+            DjPersonality::Smooth, &[],
+        );
+        let has_fx = actions.iter().any(|a| matches!(&a.kind,
+            MixActionKind::EchoOut { .. } |
+            MixActionKind::ReverbTail { .. } |
+            MixActionKind::FilterSlam { .. } |
+            MixActionKind::Spinback { .. } |
+            MixActionKind::VinylBrake { .. }
+        ));
+        assert!(!has_fx, "smooth_beatmix should not have performance FX");
+    }
+
+    #[test]
+    fn test_fx_density_values() {
+        assert!(fx_density_for_personality(DjPersonality::Lounge) < 0.2);
+        assert!(fx_density_for_personality(DjPersonality::Smooth) < 0.5);
+        assert!(fx_density_for_personality(DjPersonality::Hype) > 0.7);
+        assert!((fx_density_for_personality(DjPersonality::Festival) - 1.0).abs() < f64::EPSILON);
+    }
 }

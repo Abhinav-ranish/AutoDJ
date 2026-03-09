@@ -78,6 +78,12 @@ pub struct TrackProfileShort {
     pub vibe: Option<String>,
     pub mix_notes: Option<String>,
     pub spectral_centroid: Option<f64>,
+    /// Phase 47: spectral bass energy for vibe matching
+    pub spectral_bass_energy: Option<f64>,
+    /// Phase 47: spectral flatness (tonal vs noisy character)
+    pub spectral_flatness: Option<f64>,
+    /// Phase 47: spectral high energy (brightness/air)
+    pub spectral_high_energy: Option<f64>,
     pub vocal_presence: Option<f64>,
     pub danceability: Option<f64>,
     pub energy_trajectory: Option<String>,
@@ -216,6 +222,9 @@ pub fn build_context(input: &ContextInput) -> AiContext {
                 vibe: class.vibe,
                 mix_notes: class.mix_notes,
                 spectral_centroid: p.spectral.as_ref().map(|s| s.centroid),
+                spectral_bass_energy: p.spectral.as_ref().map(|s| s.bass_energy),
+                spectral_flatness: p.spectral.as_ref().map(|s| s.flatness),
+                spectral_high_energy: p.spectral.as_ref().map(|s| s.high_energy),
                 vocal_presence: p.vocal_presence,
                 danceability: p.rhythm.as_ref().map(|r| r.danceability),
                 energy_trajectory: p.energy_trajectory.clone(),
