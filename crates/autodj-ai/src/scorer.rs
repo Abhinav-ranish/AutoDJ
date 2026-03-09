@@ -1,4 +1,6 @@
 //! Heuristic scorer for evaluating track transition candidates.
+//! Phases 31, 32, 35, 37, 38: Enhanced scoring with anti-repetition,
+//! groove similarity, tension/release, and variety memory.
 
 use crate::AiConfig;
 use crate::camelot::camelot_distance;
@@ -10,6 +12,50 @@ pub struct ScoringCandidate<'a> {
     pub profile: &'a TrackProfile,
     pub genre: Option<&'a str>,
     pub mood: Option<&'a str>,
+    pub artist: Option<&'a str>,
+    pub vibe: Option<&'a str>,
+}
+
+/// DJ personality profile (Phase 35).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DjPersonality {
+    Smooth,
+    Hype,
+    Aggressive,
+    Festival,
+    Lounge,
+    OpenFormat,
+}
+
+impl DjPersonality {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "hype" => Self::Hype,
+            "aggressive" => Self::Aggressive,
+            "festival" => Self::Festival,
+            "lounge" => Self::Lounge,
+            "open_format" | "open-format" => Self::OpenFormat,
+            _ => Self::Smooth,
+        }
+    }
+}
+
+/// Set arc position for energy pacing (Phase 35).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetArcPhase {
+    Warmup,
+    Groove,
+    Peak,
+    Cooldown,
+}
+
+impl SetArcPhase {
+    pub fn from_set_position(fraction: f64) -> Self {
+        if fraction < 0.15 { Self::Warmup }
+        else if fraction < 0.5 { Self::Groove }
+        else if fraction < 0.8 { Self::Peak }
+        else { Self::Cooldown }
+    }
 }
 
 pub struct HeuristicScorer {
@@ -22,6 +68,7 @@ impl HeuristicScorer {
     }
 
     /// Select the best next track from a list of enriched candidates.
+    /// Phase 37: includes artist/recent penalties + transition type diversity.
     pub fn select_next<'a>(
         &self,
         current: &ScoringCandidate<'_>,
@@ -29,13 +76,75 @@ impl HeuristicScorer {
         recent_tracks: &[String],
         intent: &str,
     ) -> Option<&'a TrackProfile> {
+        self.select_next_extended(current, candidates, recent_tracks, intent, &[], None, None)
+    }
+
+    /// Extended selection with artist history & set arc awareness.
+    pub fn select_next_extended<'a>(
+        &self,
+        current: &ScoringCandidate<'_>,
+        candidates: &'a [ScoringCandidate<'a>],
+        recent_tracks: &[String],
+        intent: &str,
+        recent_artists: &[String],
+        set_position: Option<f64>,
+        personality: Option<DjPersonality>,
+    ) -> Option<&'a TrackProfile> {
         if candidates.is_empty() {
             return None;
         }
 
+        let arc_phase = set_position.map(SetArcPhase::from_set_position);
+        let personality = personality.unwrap_or(DjPersonality::Smooth);
+
         let mut scored: Vec<(&TrackProfile, f64)> = candidates
             .iter()
-            .map(|c| (c.profile, self.score(current, c, recent_tracks, intent)))
+            .map(|c| {
+                let mut s = self.score(current, c, recent_tracks, intent);
+
+                // Phase 37: Artist repetition penalty
+                if let Some(artist) = c.artist {
+                    if recent_artists.iter().any(|a| a.eq_ignore_ascii_case(artist)) {
+                        s *= 0.3; // heavy penalty for recent same artist
+                    }
+                }
+
+                // Phase 37: Recently played penalty (distance-based)
+                if let Some(pos) = recent_tracks.iter().position(|id| *id == c.profile.track_id) {
+                    let recency_penalty = 1.0 - (0.5 / (pos as f64 + 1.0));
+                    s *= recency_penalty;
+                }
+
+                // Phase 35/38: Set arc awareness — energy target per arc phase
+                if let Some(ref arc) = arc_phase {
+                    let energy = c.profile.energy.average;
+                    let arc_bonus = match arc {
+                        SetArcPhase::Warmup => if energy < 0.5 { 0.15 } else { -0.1 },
+                        SetArcPhase::Groove => if energy > 0.4 && energy < 0.75 { 0.1 } else { 0.0 },
+                        SetArcPhase::Peak => if energy > 0.65 { 0.15 } else { -0.05 },
+                        SetArcPhase::Cooldown => if energy < 0.6 { 0.15 } else { -0.1 },
+                    };
+                    s += arc_bonus;
+                }
+
+                // Phase 35: Personality bias
+                match personality {
+                    DjPersonality::Hype | DjPersonality::Festival => {
+                        if c.profile.energy.average > 0.7 { s += 0.05; }
+                    }
+                    DjPersonality::Lounge => {
+                        if c.profile.energy.average < 0.5 { s += 0.05; }
+                    }
+                    DjPersonality::Aggressive => {
+                        if c.mood.map(|m| m.eq_ignore_ascii_case("aggressive") || m.eq_ignore_ascii_case("dark")).unwrap_or(false) {
+                            s += 0.08;
+                        }
+                    }
+                    _ => {}
+                }
+
+                (c.profile, s.clamp(0.0, 2.0))
+            })
             .collect();
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
@@ -85,7 +194,10 @@ impl HeuristicScorer {
             return 0.5;
         }
         let diff = (bpm_a - bpm_b).abs();
-        (1.0 - (diff / 20.0)).clamp(0.0, 1.0)
+        // Also check half/double time compatibility
+        let half_diff = (bpm_a - bpm_b * 2.0).abs().min((bpm_a * 2.0 - bpm_b).abs());
+        let effective_diff = diff.min(half_diff);
+        (1.0 - (effective_diff / 20.0)).clamp(0.0, 1.0)
     }
 
     fn score_key(&self, camelot_a: &str, camelot_b: &str) -> f64 {
@@ -145,7 +257,7 @@ impl HeuristicScorer {
 }
 
 /// Check if two genres belong to the same family.
-fn genres_related(a: &str, b: &str) -> bool {
+pub fn genres_related(a: &str, b: &str) -> bool {
     let groups: &[&[&str]] = &[
         &["house", "deep house", "tech house", "progressive house", "electro house"],
         &["techno", "minimal techno", "industrial techno", "acid techno"],
@@ -166,7 +278,7 @@ fn genres_related(a: &str, b: &str) -> bool {
 }
 
 /// Check if two moods are adjacent on the mood wheel.
-fn moods_adjacent(a: &str, b: &str) -> bool {
+pub fn moods_adjacent(a: &str, b: &str) -> bool {
     let adjacency: &[(&str, &[&str])] = &[
         ("euphoric", &["uplifting", "energetic"]),
         ("uplifting", &["euphoric", "chill", "dreamy"]),

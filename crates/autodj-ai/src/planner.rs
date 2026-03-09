@@ -1,8 +1,10 @@
 //! AI Planner delegating decisions between the LLM and the Heuristic Scorer.
+//! Phases 31-35, 37-38: Enhanced with transition intelligence, smart entry points,
+//! anti-repetition, timing guards, personality profiles, and set arc awareness.
 
 use crate::context::{AiContext, TrackClassificationData};
 use crate::llm::LlmClient;
-use crate::scorer::{HeuristicScorer, ScoringCandidate};
+use crate::scorer::{DjPersonality, HeuristicScorer, ScoringCandidate};
 use crate::{AiConfig, AiError};
 use autodj_analysis::profile::TrackProfile;
 use serde::{Deserialize, Serialize};
@@ -78,6 +80,18 @@ pub struct AiDecision {
     pub reasoning_tags: Option<Vec<String>>,
     /// Phase 20: overall confidence (0.0–1.0)
     pub confidence: Option<f64>,
+    /// Phase 34: entry marker for incoming track (intro, drop, break, first_beat)
+    pub entry_marker: Option<String>,
+    /// Phase 34: exit marker for outgoing track (outro, break, drop)
+    pub exit_marker: Option<String>,
+    /// Phase 34: creative intensity (0.0=safe, 1.0=aggressive)
+    pub creative_intensity: Option<f64>,
+    /// Phase 34: set arc phase (warmup, groove, peak, cooldown)
+    pub set_arc: Option<String>,
+    /// Phase 33: which planner produced this decision
+    pub planner_mode: Option<String>,
+    /// Phase 31: template score breakdown for debug
+    pub template_scores: Option<Vec<(String, f64)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,19 +125,44 @@ pub enum MixActionKind {
     Play { deck: String },
     Pause { deck: String },
     ExecuteTemplate { template_name: String, params: serde_json::Value },
+    // Phase 30: DJ Performance actions
+    BeatRepeat { deck: String, beats: f32 },
+    BeatRepeatOff { deck: String },
+    VinylBrake { deck: String, duration_ms: u32 },
+    Spinback { deck: String, duration_ms: u32 },
+    JumpToMarker { deck: String, marker: String, position_ms: u64 },
+    SetSlipMode { deck: String, enabled: bool },
+    // Phase 36: Performance FX & Turntablism
+    EchoOut { deck: String, beats: f32, feedback: f32 },
+    ReverbTail { deck: String, decay_seconds: f32 },
+    FilterSlam { deck: String, direction: String },
+    Scratch { deck: String, intensity: f32 },
 }
 
 pub struct AiPlanner {
     config: AiConfig,
     scorer: HeuristicScorer,
     llm: LlmClient,
+    /// Phase 31: Track recently used transition templates for anti-repetition.
+    recent_templates: Vec<String>,
+    /// Phase 37: Track recently used artist names.
+    recent_artists: Vec<String>,
+    /// Phase 35: DJ personality profile.
+    personality: DjPersonality,
 }
 
 impl AiPlanner {
     pub fn new(config: AiConfig) -> Self {
         let scorer = HeuristicScorer::new(config.clone());
         let llm = LlmClient::new();
-        Self { config, scorer, llm }
+        Self {
+            config,
+            scorer,
+            llm,
+            recent_templates: Vec::new(),
+            recent_artists: Vec::new(),
+            personality: DjPersonality::Smooth,
+        }
     }
 
     pub fn config(&self) -> &AiConfig {
@@ -133,6 +172,26 @@ impl AiPlanner {
     pub fn set_config(&mut self, config: AiConfig) {
         self.config = config.clone();
         self.scorer = HeuristicScorer::new(config);
+    }
+
+    pub fn set_personality(&mut self, name: &str) {
+        self.personality = DjPersonality::from_str(name);
+    }
+
+    /// Record a used template for anti-repetition (Phase 31).
+    pub fn record_template_use(&mut self, template: &str) {
+        self.recent_templates.push(template.to_string());
+        if self.recent_templates.len() > 6 {
+            self.recent_templates.remove(0);
+        }
+    }
+
+    /// Record a played artist for variety (Phase 37).
+    pub fn record_artist(&mut self, artist: &str) {
+        self.recent_artists.push(artist.to_string());
+        if self.recent_artists.len() > 10 {
+            self.recent_artists.remove(0);
+        }
     }
 
     /// Try to get a plan from the LLM. If it fails or is disabled, fallback to heuristics.
@@ -149,8 +208,9 @@ impl AiPlanner {
 
         if self.config.enabled && self.config.api_key.is_some() {
             match self.query_llm(context).await {
-                Ok(decision) => {
+                Ok(mut decision) => {
                     log::info!("LLM returned decision: {}", decision.decision);
+                    decision.planner_mode = Some(format!("llm_live:{}", self.config.provider));
                     if let Some(ref track_id) = decision.track_selection {
                         if !available_profiles.iter().any(|p| &p.track_id == track_id) {
                             log::warn!("LLM selected unknown track ID. Falling back.");
@@ -195,6 +255,8 @@ impl AiPlanner {
             profile: current_profile,
             genre: current_class.and_then(|c| c.genre.as_deref()),
             mood: current_class.and_then(|c| c.mood.as_deref()),
+            artist: None,
+            vibe: current_class.and_then(|c| c.vibe.as_deref()),
         };
 
         let candidates: Vec<ScoringCandidate> = available_profiles
@@ -205,29 +267,74 @@ impl AiPlanner {
                     profile: p,
                     genre: class.and_then(|c| c.genre.as_deref()),
                     mood: class.and_then(|c| c.mood.as_deref()),
+                    artist: None,
+                    vibe: class.and_then(|c| c.vibe.as_deref()),
                 }
             })
             .collect();
 
-        let next_track = self.scorer.select_next(
+        // Phase 37: compute set position from session flow
+        let set_position = context.set_flow.as_ref().map(|f| {
+            // Estimate position in set: assume ~20 tracks for a typical set
+            let est_total = 20.0_f64;
+            (f.tracks_played as f64 / est_total).min(1.0)
+        });
+
+        let next_track = self.scorer.select_next_extended(
             &current_candidate,
             &candidates,
             &context.constraints.recent_tracks,
             &context.preferences.intent,
+            &self.recent_artists,
+            set_position,
+            Some(self.personality),
         ).ok_or(AiError::NoCandidates)?;
 
+        // ── Phase 38: Timing guards ──────────────────────────────────────────
+        let now_ms = context.current_state.elapsed_ms;
+        let duration_ms = context.current_state.duration_ms;
+        let position_frac = if duration_ms > 0 { now_ms as f64 / duration_ms as f64 } else { 0.0 };
+
+        // Too-early guard: don't transition before 20% unless it's an emergency
+        let too_early = position_frac < 0.20;
+        // Too-late guard: avoid dead-end outros — transition before 95%
+        let too_late = position_frac > 0.95;
+
         let is_ending = context.current_state.time_remaining_ms < 60_000;
-        let decision = if is_ending { "transition_now" } else { "prepare_next" };
+        let decision = if too_late || is_ending { "transition_now" }
+        else if too_early { "wait" }
+        else { "prepare_next" };
+
+        // If we should wait, return early
+        if decision == "wait" {
+            return Ok(AiDecision {
+                decision: "wait".to_string(),
+                reason: format!("Too early to transition ({}% through track)", (position_frac * 100.0) as u32),
+                track_selection: Some(next_track.track_id.clone()),
+                execute_at_ms: None,
+                transition_plan: None,
+                actions: None,
+                reasoning_tags: Some(vec!["too_early_guard".to_string()]),
+                confidence: Some(0.5),
+                entry_marker: None,
+                exit_marker: None,
+                creative_intensity: None,
+                set_arc: set_position.map(|p| {
+                    crate::scorer::SetArcPhase::from_set_position(p)
+                }).map(|a| format!("{:?}", a).to_lowercase()),
+                planner_mode: Some("heuristic_only".to_string()),
+                template_scores: None,
+            });
+        }
 
         // ── Section-aware transition timing ──────────────────────────────────
-        // Pick the best transition window whose start is still in the future.
-        let now_ms = context.current_state.elapsed_ms;
         let best_window = current_profile.transition_windows.iter()
             .filter(|w| w.start_ms > now_ms)
             .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
 
+        let exit_marker = best_window.map(|w| w.anchor.clone());
+
         let execute_at = if let Some(w) = best_window {
-            // Snap to nearest phrase boundary if we have phrase data
             if let Some(ref phrases) = current_profile.phrases {
                 autodj_analysis::sections::next_phrase_boundary(phrases, w.start_ms)
                     .unwrap_or(w.start_ms)
@@ -235,13 +342,26 @@ impl AiPlanner {
                 w.start_ms
             }
         } else {
-            // Fallback: use outro start
-            context.current_state.duration_ms.saturating_sub(
+            duration_ms.saturating_sub(
                 context.current_state.outro_length_ms.unwrap_or(10_000)
             )
         };
 
-        // ── Template selection rules ─────────────────────────────────────────
+        // ── Phase 38: Late-groove protection ─────────────────────────────────
+        // If current section just became high-engagement, delay transition
+        let engagement_hold = best_window.map(|w| {
+            w.anchor.contains("drop") && (execute_at.saturating_sub(now_ms) < 8000)
+        }).unwrap_or(false);
+
+        let execute_at = if engagement_hold {
+            // Hold for 16 more bars then transition
+            let bar_ms = (60_000.0 / current_profile.tempo.bpm * 4.0) as u64;
+            execute_at + 16 * bar_ms
+        } else {
+            execute_at
+        };
+
+        // ── Template selection ───────────────────────────────────────────────
         let energy_jump = next_track.energy.average - current_profile.energy.average;
         let next_class = classifications.get(&next_track.track_id);
         let genre_change = match (
@@ -260,79 +380,70 @@ impl AiPlanner {
         };
         let bpm_diff = (current_profile.tempo.bpm - next_track.tempo.bpm).abs();
 
-        // Section proximity: check which section we're transitioning from
         let near_drop = best_window.map(|w| w.anchor.contains("drop")).unwrap_or(false);
         let near_breakdown = best_window.map(|w| {
             w.anchor.contains("break") || w.anchor.contains("breakdown")
         }).unwrap_or(false);
         let near_outro = best_window.map(|w| w.anchor.contains("outro")).unwrap_or(false);
 
-        // Energy trajectory
         let trajectory_building = current_profile.energy_trajectory.as_deref() == Some("building");
         let trajectory_declining = current_profile.energy_trajectory.as_deref() == Some("declining");
 
-        // Rhythm profile
         let high_complexity = current_profile.rhythm.as_ref()
             .map(|r| r.complexity > 0.7).unwrap_or(false);
         let high_danceability = current_profile.rhythm.as_ref()
             .map(|r| r.danceability > 0.7).unwrap_or(false);
 
-        // Incoming track has a strong drop we can ride into
         let incoming_has_drop = next_track.first_drop_ms.is_some();
 
-        // ── Score each template and pick best ────────────────────────────────
-        let mut candidates: Vec<(&str, f64, Vec<&str>)> = Vec::new();
+        // ── Score each template ──────────────────────────────────────────────
+        let mut template_candidates: Vec<(&str, f64, Vec<&str>)> = Vec::new();
 
-        // SmoothBeatmix: safe default, best for same-genre similar-energy
+        // SmoothBeatmix
         {
-            let mut score = 0.5; // base score (no longer the overwhelming default)
+            let mut score = 0.5;
             if !genre_change && energy_jump.abs() < 0.15 { score += 0.2; }
             if near_outro { score += 0.1; }
             if bpm_diff < 4.0 { score += 0.1; }
-            if vocal_overlap { score -= 0.3; } // bad for vocal overlap
-            candidates.push(("smooth_beatmix", score, vec!["compatible", "smooth_beatmix"]));
+            if vocal_overlap { score -= 0.3; }
+            template_candidates.push(("smooth_beatmix", score, vec!["compatible", "smooth_beatmix"]));
         }
-
-        // FilterSweep: good for energy builds, genre changes, building trajectory
+        // FilterSweep
         {
             let mut score = 0.3;
             if trajectory_building { score += 0.3; }
             if genre_change { score += 0.25; }
             if energy_jump > 0.1 { score += 0.2; }
             if near_breakdown { score += 0.15; }
-            candidates.push(("filter_sweep", score, vec!["filter_sweep"]));
+            template_candidates.push(("filter_sweep", score, vec!["filter_sweep"]));
         }
-
-        // DropSwap: dramatic, for drop proximity or big energy jumps
+        // DropSwap
         {
             let mut score = 0.2;
             if near_drop { score += 0.4; }
             if energy_jump > 0.2 { score += 0.25; }
             if trajectory_building && incoming_has_drop { score += 0.2; }
-            if bpm_diff > 10.0 { score -= 0.2; } // hard cuts need tempo alignment
-            candidates.push(("drop_swap", score, vec!["drop_swap"]));
+            if bpm_diff > 10.0 { score -= 0.2; }
+            template_candidates.push(("drop_swap", score, vec!["drop_swap"]));
         }
-
-        // EchoDrop: big drama moments, large tempo/genre jumps
+        // EchoDrop
         {
             let mut score = 0.15;
             if energy_jump > 0.3 { score += 0.3; }
             if bpm_diff > 10.0 { score += 0.25; }
             if genre_change && energy_jump.abs() > 0.2 { score += 0.2; }
-            candidates.push(("echo_drop", score, vec!["echo_drop"]));
+            template_candidates.push(("echo_drop", score, vec!["echo_drop"]));
         }
-
-        // LoopRoll: high impact, works with complex rhythms at peak energy
+        // LoopRoll
         {
             let mut score = 0.15;
             if high_complexity { score += 0.3; }
             if energy_jump > 0.25 { score += 0.2; }
             if bpm_diff > 8.0 { score += 0.15; }
             if near_drop { score += 0.1; }
-            candidates.push(("loop_roll", score, vec!["loop_roll"]));
+            template_candidates.push(("loop_roll", score, vec!["loop_roll"]));
         }
-
-        // BassKillSwap: clean power swap, same genre, groovy tracks
+        // BassKillSwap
         {
             let mut score = 0.3;
             if !genre_change { score += 0.15; }
@@ -340,54 +451,108 @@ impl AiPlanner {
             if energy_jump.abs() < 0.15 { score += 0.15; }
             if near_outro { score += 0.1; }
             if vocal_overlap { score -= 0.2; }
-            candidates.push(("bass_kill_swap", score, vec!["bass_kill_swap"]));
+            template_candidates.push(("bass_kill_swap", score, vec!["bass_kill_swap"]));
         }
-
-        // BreakBlend: gentle, vocal-friendly, low energy or declining
+        // BreakBlend
         {
             let mut score = 0.25;
             if vocal_overlap { score += 0.4; }
             if trajectory_declining { score += 0.25; }
             if energy_jump < -0.15 { score += 0.2; }
             if near_breakdown { score += 0.15; }
-            candidates.push(("break_blend", score, vec!["break_blend"]));
+            template_candidates.push(("break_blend", score, vec!["break_blend"]));
         }
-
-        // BackspinCut: stylistic flair, genre changes, moderate energy
+        // BackspinCut
         {
             let mut score = 0.1;
             if genre_change { score += 0.25; }
             if energy_jump.abs() > 0.15 && energy_jump.abs() < 0.35 { score += 0.2; }
-            if !near_drop && !near_breakdown { score += 0.1; } // works anywhere
-            candidates.push(("backspin_cut", score, vec!["backspin_cut"]));
+            if !near_drop && !near_breakdown { score += 0.1; }
+            template_candidates.push(("backspin_cut", score, vec!["backspin_cut"]));
         }
-
-        // DropRide: ride both drops simultaneously, high energy
+        // DropRide
         {
             let mut score = 0.1;
             if incoming_has_drop && near_drop { score += 0.35; }
             if energy_jump.abs() < 0.2 { score += 0.15; }
             if !genre_change { score += 0.1; }
             if high_danceability { score += 0.1; }
-            candidates.push(("drop_ride", score, vec!["drop_ride"]));
+            template_candidates.push(("drop_ride", score, vec!["drop_ride"]));
+        }
+
+        // Phase 31: Anti-repetition penalty — penalize recently used templates
+        for tc in &mut template_candidates {
+            let recent_count = self.recent_templates.iter()
+                .filter(|t| t.as_str() == tc.0)
+                .count();
+            if recent_count > 0 {
+                tc.1 *= 0.6_f64.powi(recent_count as i32);
+            }
+        }
+
+        // Phase 35: Personality-based template preferences
+        match self.personality {
+            DjPersonality::Aggressive | DjPersonality::Festival => {
+                for tc in &mut template_candidates {
+                    match tc.0 {
+                        "drop_swap" | "loop_roll" | "backspin_cut" => tc.1 += 0.1,
+                        "smooth_beatmix" | "break_blend" => tc.1 -= 0.05,
+                        _ => {}
+                    }
+                }
+            }
+            DjPersonality::Lounge => {
+                for tc in &mut template_candidates {
+                    match tc.0 {
+                        "smooth_beatmix" | "break_blend" | "filter_sweep" => tc.1 += 0.1,
+                        "drop_swap" | "loop_roll" | "backspin_cut" => tc.1 -= 0.1,
+                        _ => {}
+                    }
+                }
+            }
+            DjPersonality::Hype => {
+                for tc in &mut template_candidates {
+                    match tc.0 {
+                        "drop_swap" | "drop_ride" | "echo_drop" => tc.1 += 0.08,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
         }
 
         // Sort descending by score
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        template_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Capture template scores for debug (Phase 39)
+        let template_scores: Vec<(String, f64)> = template_candidates.iter()
+            .map(|(name, score, _)| (name.to_string(), *score))
+            .collect();
 
         // Add variety: if top 2 scores are within 0.1, randomly pick between them
-        // using a simple deterministic "random" based on elapsed time
-        let (template_name, _, reasoning_tags) = if candidates.len() >= 2
-            && (candidates[0].1 - candidates[1].1) < 0.1
+        let (template_name, _, reasoning_tags) = if template_candidates.len() >= 2
+            && (template_candidates[0].1 - template_candidates[1].1) < 0.1
         {
-            // Use elapsed_ms as a simple entropy source to alternate picks
             if context.current_state.elapsed_ms % 2 == 0 {
-                candidates.remove(1)
+                template_candidates.remove(1)
             } else {
-                candidates.remove(0)
+                template_candidates.remove(0)
             }
         } else {
-            candidates.remove(0)
+            template_candidates.remove(0)
+        };
+
+        // ── Phase 32: Smart entry point selection ────────────────────────────
+        // Determine the best entry cue for the incoming track
+        let entry_marker = select_entry_point(next_track, template_name, energy_jump);
+
+        // Creative intensity based on personality + energy context
+        let creative_intensity = match self.personality {
+            DjPersonality::Aggressive | DjPersonality::Festival => 0.8,
+            DjPersonality::Hype => 0.7,
+            DjPersonality::OpenFormat => 0.6,
+            DjPersonality::Smooth => 0.4,
+            DjPersonality::Lounge => 0.2,
         };
 
         // ── Build action timeline ────────────────────────────────────────────
@@ -395,6 +560,21 @@ impl AiPlanner {
         let bar_ms = beat_ms * 4;
         let incoming_deck = if context.current_state.playing_deck == "A" { "B" } else { "A" };
         let outgoing_deck = context.current_state.playing_deck.clone();
+
+        // Phase 32: Determine incoming start position from entry point
+        let incoming_start_ms = match entry_marker.as_deref() {
+            Some("drop") => next_track.first_drop_ms.unwrap_or(0),
+            Some("break") => {
+                // Use section markers if available, else estimate from intro
+                next_track.intro_length_ms.map(|i| i + 8000).unwrap_or(0)
+            }
+            Some("first_beat") => {
+                // Skip silence, start at first beat
+                next_track.intro_length_ms.unwrap_or(0).min(2000)
+            }
+            _ => 0, // "intro" or default — start from beginning
+        };
+
         let actions = build_heuristic_timeline(
             template_name,
             &outgoing_deck,
@@ -402,18 +582,24 @@ impl AiPlanner {
             &next_track.track_id,
             bar_ms,
             next_track.tempo.bpm,
+            incoming_start_ms,
         );
+
+        let arc_label = set_position.map(|p| {
+            crate::scorer::SetArcPhase::from_set_position(p)
+        }).map(|a| format!("{:?}", a).to_lowercase());
 
         Ok(AiDecision {
             decision: decision.to_string(),
             reason: format!(
-                "Heuristic: selected {} (genre: {}, mood: {}, template: {}, window: {}).",
+                "Heuristic: selected {} (genre: {}, mood: {}, template: {}, window: {}, entry: {}).",
                 next_track.track_id,
                 next_class.and_then(|c| c.genre.as_deref()).unwrap_or("unknown"),
                 next_class.and_then(|c| c.mood.as_deref()).unwrap_or("unknown"),
                 template_name,
                 best_window.map(|w| format!("{}ms score={:.2}", w.start_ms, w.score))
                     .unwrap_or_else(|| "fallback".to_string()),
+                entry_marker.as_deref().unwrap_or("intro"),
             ),
             track_selection: Some(next_track.track_id.clone()),
             execute_at_ms: Some(execute_at),
@@ -424,7 +610,29 @@ impl AiPlanner {
             actions: Some(actions),
             reasoning_tags: Some(reasoning_tags.into_iter().map(String::from).collect()),
             confidence: Some(0.7),
+            entry_marker: entry_marker.clone(),
+            exit_marker,
+            creative_intensity: Some(creative_intensity),
+            set_arc: arc_label,
+            planner_mode: Some("heuristic_only".to_string()),
+            template_scores: Some(template_scores),
         })
+    }
+}
+
+/// Phase 32: Select the best entry point for the incoming track based on
+/// template, energy delta, and available cue/section data.
+fn select_entry_point(track: &TrackProfile, template: &str, energy_jump: f64) -> Option<String> {
+    let has_drop = track.first_drop_ms.is_some();
+    let has_intro = track.intro_length_ms.is_some();
+
+    match template {
+        "drop_swap" | "drop_ride" if has_drop => Some("drop".to_string()),
+        "break_blend" => Some("intro".to_string()),
+        "echo_drop" if has_drop && energy_jump > 0.2 => Some("drop".to_string()),
+        _ if energy_jump > 0.25 && has_drop => Some("drop".to_string()),
+        _ if has_intro => Some("intro".to_string()),
+        _ => Some("first_beat".to_string()),
     }
 }
 
@@ -441,6 +649,7 @@ fn build_heuristic_timeline(
     incoming_track_id: &str,
     bar_ms: u64,
     incoming_bpm: f64,
+    incoming_start_ms: u64,
 ) -> Vec<MixAction> {
     let mut actions = Vec::new();
     let out = outgoing.to_string();
@@ -450,6 +659,10 @@ fn build_heuristic_timeline(
     actions.push(MixAction { at_ms: 0, kind: MixActionKind::LoadTrack { deck: inc.clone(), track_id: incoming_track_id.to_string() } });
     actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetTempo { deck: inc.clone(), bpm: incoming_bpm } });
     actions.push(MixAction { at_ms: 0, kind: MixActionKind::SetGain { deck: inc.clone(), gain_db: -40.0 } });
+    // Phase 32: Jump to entry point if not starting from zero
+    if incoming_start_ms > 0 {
+        actions.push(MixAction { at_ms: 0, kind: MixActionKind::JumpToMarker { deck: inc.clone(), marker: "entry".to_string(), position_ms: incoming_start_ms } });
+    }
     actions.push(MixAction { at_ms: 0, kind: MixActionKind::Play { deck: inc.clone() } });
 
     match template {
