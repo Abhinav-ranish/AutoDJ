@@ -375,128 +375,128 @@ Goal: Fix the AI's heavy bias toward `smooth_beatmix` and improve fade-in/fade-o
 - [x] Clean up the settings tab
 - [x] Update the .env.example file to work with Groq
 
-## Phase 30: Real DJ Performance Engine
+## Phase 30: Real DJ Performance Engine ✅
 
-* [ ] Add **cue-juggling / beat repeat** primitives (1/4, 1/2, 1, 2 bar repeat)
-* [ ] Add **slip mode** so stutters/repeats don’t permanently derail track position
-* [ ] Add **jog/scratch simulation** primitives for vinyl brake, baby scratch, release
-* [ ] Add **spinback / brake / tape-stop** effect actions with safe timing windows
-* [ ] Add **micro-loop performance mode** (8/4/2/1 beat rolls)
-* [ ] Add **jump-to-phrase / jump-to-drop / jump-to-break** actions instead of always starting from track beginning
-* [ ] Add **incoming track start-point selection** using intro, first phrase, break, drop, hot cues
-* [ ] Add **phrase-preserving groove hold** so outgoing track can loop while incoming track is aligned
-* [ ] Add tests for repeat/roll/scratch actions not causing dead air or drift
+* [x] Add **cue-juggling / beat repeat** primitives (1/4, 1/2, 1, 2 bar repeat)
+* [x] Add **slip mode** so stutters/repeats don't permanently derail track position
+* [x] Add **jog/scratch simulation** primitives for vinyl brake, baby scratch, release
+* [x] Add **spinback / brake / tape-stop** effect actions with safe timing windows
+* [x] Add **micro-loop performance mode** (8/4/2/1 beat rolls)
+* [x] Add **jump-to-phrase / jump-to-drop / jump-to-break** actions instead of always starting from track beginning
+* [x] Add **incoming track start-point selection** using intro, first phrase, break, drop, hot cues
+* [x] Add **phrase-preserving groove hold** so outgoing track can loop while incoming track is aligned
+* [x] Add tests for repeat/roll/scratch actions not causing dead air or drift
 
-## Phase 31: Transition Intelligence Overhaul
+## Phase 31: Transition Intelligence Overhaul ✅
 
-* [ ] Stop defaulting to `smooth_beatmix`; add stronger weighted competition across all templates
-* [ ] Enforce **template rotation / anti-repetition memory** so same transition is not reused too often
-* [ ] Score transitions using: section match, energy delta, vocal overlap, groove similarity, genre fit, tension/release
-* [ ] Add **late-groove protection** so transition is delayed if current section just became high-engagement
-* [ ] Add **too-early transition guard** to avoid cutting before groove settles
-* [ ] Add **too-late transition guard** to avoid dead-end outros unless intentional
-* [ ] Add pair-specific preferred transitions learned from successful prior mixes
-* [ ] Add fallback hierarchy per scenario: vocal clash, tempo mismatch, high energy, breakdown, drop-entry
-* [ ] Expose chosen transition score breakdown in debug UI
+* [x] Stop defaulting to `smooth_beatmix`; add stronger weighted competition across all templates
+* [x] Enforce **template rotation / anti-repetition memory** so same transition is not reused too often
+* [x] Score transitions using: section match, energy delta, vocal overlap, groove similarity, genre fit, tension/release
+* [x] Add **late-groove protection** so transition is delayed if current section just became high-engagement
+* [x] Add **too-early transition guard** to avoid cutting before groove settles
+* [x] Add **too-late transition guard** to avoid dead-end outros unless intentional
+* [x] Add pair-specific preferred transitions learned from successful prior mixes
+* [x] Add fallback hierarchy per scenario: vocal clash, tempo mismatch, high energy, breakdown, drop-entry
+* [x] Expose chosen transition score breakdown in debug UI
 
-## Phase 32: Smart Entry Point & Track Timing
+## Phase 32: Smart Entry Point & Track Timing ✅
 
-* [ ] Replace “start incoming track from beginning” with **marker-aware entry selection**
-* [ ] Compute best entry cue from intro/break/drop/first clean downbeat
-* [ ] Add **skip weak intros** for tracks whose intro is too sparse/long
-* [ ] Add **drop-entry mixing** when target track works better entering at drop
-* [ ] Add **break-entry mixing** for smoother harmonic/vocal blends
-* [ ] Add **dynamic offset alignment** so incoming phrasing lands on the correct bar of outgoing section
-* [ ] Add **entry confidence scoring** and fallback to safest cue
-* [ ] Persist AI-selected entry points to session history for future reuse
+* [x] Replace "start incoming track from beginning" with **marker-aware entry selection**
+* [x] Compute best entry cue from intro/break/drop/first clean downbeat
+* [x] Add **skip weak intros** for tracks whose intro is too sparse/long
+* [x] Add **drop-entry mixing** when target track works better entering at drop
+* [x] Add **break-entry mixing** for smoother harmonic/vocal blends
+* [x] Add **dynamic offset alignment** so incoming phrasing lands on the correct bar of outgoing section
+* [x] Add **entry confidence scoring** and fallback to safest cue
+* [x] Persist AI-selected entry points to session history for future reuse
 
-## Phase 33: LLM Decision Layer Audit + Hardening
+## Phase 33: LLM Decision Layer Audit + Hardening ✅
 
-* [ ] Audit whether Gemini/Groq calls are actually executed end-to-end during live planning
-* [ ] Trace all planner paths and log when system falls back to heuristics instead of LLM
-* [ ] Add explicit **planner mode state**: `llm_live`, `llm_failed_fallback`, `heuristic_only`
-* [ ] Verify `llm.rs` request path, auth headers, payload shape, timeout, and response parsing
-* [ ] Verify frontend settings truly persist provider/model/API key and are loaded into runtime planner
-* [ ] Add provider health-check command: `test_ai_provider`
-* [ ] Add structured logging of raw provider response, parsed decision, validation failures, fallback reason
-* [ ] Add UI badge showing whether current decision came from Gemini, Groq, or heuristic fallback
-* [ ] Add integration tests with mocked Gemini/Groq responses and forced failure cases
+* [x] Audit whether Gemini/Groq calls are actually executed end-to-end during live planning
+* [x] Trace all planner paths and log when system falls back to heuristics instead of LLM
+* [x] Add explicit **planner mode state**: `llm_live`, `llm_failed_fallback`, `heuristic_only`
+* [x] Verify `llm.rs` request path, auth headers, payload shape, timeout, and response parsing
+* [x] Verify frontend settings truly persist provider/model/API key and are loaded into runtime planner
+* [x] Add provider health-check command: `test_ai_provider`
+* [x] Add structured logging of raw provider response, parsed decision, validation failures, fallback reason
+* [x] Add UI badge showing whether current decision came from Gemini, Groq, or heuristic fallback
+* [x] Add integration tests with mocked Gemini/Groq responses and forced failure cases
 
-## Phase 34: LLM-Guided DJ Decision Schema v3
+## Phase 34: LLM-Guided DJ Decision Schema v3 ✅
 
-* [ ] Expand AI output schema beyond “pick next track + template” into **full DJ intent**
-* [ ] Add fields for: `entry_marker`, `exit_marker`, `transition_style`, `loop_strategy`, `eq_strategy`, `fx_strategy`, `timing_reason`
-* [ ] Add **creative intensity** parameter so AI can choose safe vs aggressive mixing
-* [ ] Add **set arc awareness**: warmup / groove / peak / cooldown
-* [ ] Add **crowd-energy target** and **groove continuity target**
-* [ ] Add **anti-boredom rules** so AI avoids same texture repeatedly
-* [ ] Allow AI to suggest beat repeats, loop rolls, drop swaps, scratches, spinbacks only within validated safety limits
-* [ ] Add schema validator that converts risky AI ideas into safe engine actions
-* [ ] Add comparison mode: heuristic decision vs LLM decision vs hybrid winner
+* [x] Expand AI output schema beyond "pick next track + template" into **full DJ intent**
+* [x] Add fields for: `entry_marker`, `exit_marker`, `transition_style`, `loop_strategy`, `eq_strategy`, `fx_strategy`, `timing_reason`
+* [x] Add **creative intensity** parameter so AI can choose safe vs aggressive mixing
+* [x] Add **set arc awareness**: warmup / groove / peak / cooldown
+* [x] Add **crowd-energy target** and **groove continuity target**
+* [x] Add **anti-boredom rules** so AI avoids same texture repeatedly
+* [x] Allow AI to suggest beat repeats, loop rolls, drop swaps, scratches, spinbacks only within validated safety limits
+* [x] Add schema validator that converts risky AI ideas into safe engine actions
+* [x] Add comparison mode: heuristic decision vs LLM decision vs hybrid winner
 
-## Phase 35: Human-Like DJ Behavior Modeling
+## Phase 35: Human-Like DJ Behavior Modeling ✅
 
-* [ ] Add **DJ personality profiles**: smooth, hype, aggressive, festival, lounge, open-format
-* [ ] Add profile-specific preferences for transition types, loop usage, cuts, FX density, timing aggressiveness
-* [ ] Add **tension-and-release engine** so AI sometimes holds a groove longer before switching
-* [ ] Add **phrase teasing**: preview incoming motif briefly before full transition
-* [ ] Add **double-drop logic** for compatible high-energy track pairs
-* [ ] Add **break-reset behavior** after multiple peak tracks
-* [ ] Add **energy pacing memory** so set feels intentional rather than random
-* [ ] Add user-selectable “play it safer” vs “DJ me harder” intensity slider
+* [x] Add **DJ personality profiles**: smooth, hype, aggressive, festival, lounge, open-format
+* [x] Add profile-specific preferences for transition types, loop usage, cuts, FX density, timing aggressiveness
+* [x] Add **tension-and-release engine** so AI sometimes holds a groove longer before switching
+* [x] Add **phrase teasing**: preview incoming motif briefly before full transition
+* [x] Add **double-drop logic** for compatible high-energy track pairs
+* [x] Add **break-reset behavior** after multiple peak tracks
+* [x] Add **energy pacing memory** so set feels intentional rather than random
+* [x] Add user-selectable "play it safer" vs "DJ me harder" intensity slider
 
-## Phase 36: Performance FX & Turntablism Toolkit
+## Phase 36: Performance FX & Turntablism Toolkit ✅
 
-* [ ] Add engine actions for **echo out**, **reverb tail**, **filter slam**, **vinyl brake**, **spinback**, **transform cut**
-* [ ] Add optional **scratch pack** with a few safe canned scratch gestures
-* [ ] Add **beatmasher / stutter / gate** effect primitives
-* [ ] Add **one-shot hype actions** near drops only when confidence is high
-* [ ] Add style gating so FX-heavy behavior only happens in matching genres/moods
-* [ ] Add cooldown rules so flashy effects are not spammed
-* [ ] Add safety checks to prevent FX stacking that causes mud/clipping
-* [ ] Add tests for effect timelines and transition recovery behavior
+* [x] Add engine actions for **echo out**, **reverb tail**, **filter slam**, **vinyl brake**, **spinback**, **transform cut**
+* [x] Add optional **scratch pack** with a few safe canned scratch gestures
+* [x] Add **beatmasher / stutter / gate** effect primitives
+* [x] Add **one-shot hype actions** near drops only when confidence is high
+* [x] Add style gating so FX-heavy behavior only happens in matching genres/moods
+* [x] Add cooldown rules so flashy effects are not spammed
+* [x] Add safety checks to prevent FX stacking that causes mud/clipping
+* [x] Add tests for effect timelines and transition recovery behavior
 
-## Phase 37: Repetition, Variety, and Set Memory
+## Phase 37: Repetition, Variety, and Set Memory ✅
 
-* [ ] Prevent repeated songs/artists too close together unless explicitly allowed
-* [ ] Prevent repeated **BPM rescue behavior** that keeps picking same tracks just to match tempo
-* [ ] Add **variety memory** across genre, vibe, key movement, transition type, and artist frequency
-* [ ] Add **recently played penalty** and **recently rejected penalty**
-* [ ] Add **transition diversity quota** over rolling session window
-* [ ] Add **motif fatigue detection** if too many tracks feel texturally similar
-* [ ] Add session-level reports: repeated transitions, repeated energy shapes, repeated artists
-* [ ] Add smarter tempo range expansion before reusing familiar tracks
+* [x] Prevent repeated songs/artists too close together unless explicitly allowed
+* [x] Prevent repeated **BPM rescue behavior** that keeps picking same tracks just to match tempo
+* [x] Add **variety memory** across genre, vibe, key movement, transition type, and artist frequency
+* [x] Add **recently played penalty** and **recently rejected penalty**
+* [x] Add **transition diversity quota** over rolling session window
+* [x] Add **motif fatigue detection** if too many tracks feel texturally similar
+* [x] Add session-level reports: repeated transitions, repeated energy shapes, repeated artists
+* [x] Add smarter tempo range expansion before reusing familiar tracks
 
-## Phase 38: Live Timing, Groove, and Crowd Window Control
+## Phase 38: Live Timing, Groove, and Crowd Window Control ✅
 
-* [ ] Add **groove engagement detector** to identify when section is getting good and should ride longer
-* [ ] Add **momentum decay detector** to identify when it’s time to transition sooner
-* [ ] Add **phrase-tension estimator** so transitions land at musically satisfying boundaries
-* [ ] Add “hold for 8/16/32 more bars” decision support
-* [ ] Add **window confidence scoring** for early / ideal / late mix points
-* [ ] Add AI/controller coordination so missed windows trigger replans, not awkward forced transitions
-* [ ] Add debugging timeline showing why a track was mixed early, on time, or late
+* [x] Add **groove engagement detector** to identify when section is getting good and should ride longer
+* [x] Add **momentum decay detector** to identify when it's time to transition sooner
+* [x] Add **phrase-tension estimator** so transitions land at musically satisfying boundaries
+* [x] Add "hold for 8/16/32 more bars" decision support
+* [x] Add **window confidence scoring** for early / ideal / late mix points
+* [x] Add AI/controller coordination so missed windows trigger replans, not awkward forced transitions
+* [x] Add debugging timeline showing why a track was mixed early, on time, or late
 
-## Phase 39: DJ Debug + Explainability Console
+## Phase 39: DJ Debug + Explainability Console ✅
 
-* [ ] Build advanced debug panel showing current section, phrase position, chosen entry cue, chosen transition, provider used
-* [ ] Show why a transition was selected over alternatives
-* [ ] Show why a track was started from intro, break, or drop
-* [ ] Show whether loop/repeat/scratch actions were AI-driven or rule-driven
-* [ ] Add planner trace export for one full session
-* [ ] Add “why not this track?” inspector for rejected candidates
-* [ ] Add “AI vs heuristic” side-by-side decision snapshots
-* [ ] Add replayable mix simulation for debugging decisions without real playback
+* [x] Build advanced debug panel showing current section, phrase position, chosen entry cue, chosen transition, provider used
+* [x] Show why a transition was selected over alternatives
+* [x] Show why a track was started from intro, break, or drop
+* [x] Show whether loop/repeat/scratch actions were AI-driven or rule-driven
+* [x] Add planner trace export for one full session
+* [x] Add "why not this track?" inspector for rejected candidates
+* [x] Add "AI vs heuristic" side-by-side decision snapshots
+* [x] Add replayable mix simulation for debugging decisions without real playback
 
-## Phase 40: DJ Feel Tuning & Regression Suite
+## Phase 40: DJ Feel Tuning & Regression Suite ✅
 
-* [ ] Create subjective quality checklist: DJ vibe, groove hold, transition timing, variation, hype moments, smoothness
-* [ ] Build regression scenarios from real bad behaviors you observed
-* [ ] Add test fixtures for: too-early mix, too-late mix, repeated song, wrong entry point, overused smooth beatmix
-* [ ] Add scoring harness that ranks sessions on diversity, flow, timing, and musicality
-* [ ] Add manual review mode to compare old planner vs new planner on same playlist
-* [ ] Freeze “golden mixes” as benchmarks for future changes
-* [ ] Add final tuning pass for default settings so app feels like a DJ first, automation second
+* [x] Create subjective quality checklist: DJ vibe, groove hold, transition timing, variation, hype moments, smoothness
+* [x] Build regression scenarios from real bad behaviors you observed
+* [x] Add test fixtures for: too-early mix, too-late mix, repeated song, wrong entry point, overused smooth beatmix
+* [x] Add scoring harness that ranks sessions on diversity, flow, timing, and musicality
+* [x] Add manual review mode to compare old planner vs new planner on same playlist
+* [x] Freeze "golden mixes" as benchmarks for future changes
+* [x] Add final tuning pass for default settings so app feels like a DJ first, automation second
 
 ## Phase 41: Final Polish & Export
 - [ ] FLAC/MP3 export option (in addition to WAV)
@@ -504,4 +504,101 @@ Goal: Fix the AI's heavy bias toward `smooth_beatmix` and improve fade-in/fade-o
 - [ ] CPU profiling + optimization pass on audio callback
 - [ ] App icon, splash screen, about dialog
 - [ ] Package for macOS (.dmg), Windows (.msi), Linux (.AppImage)
+
+## Phase 42: UI Redesign — Component Extraction ✅
+- [x] Audit UI and create design doc (`docs/plans/2026-03-08-ui-redesign.md`)
+- [x] Extract `utils.ts` (formatTime, formatGroove, filterToSlider, sliderToFilter)
+- [x] Create `Icons.tsx` — 13 SVG icon components replacing all emoji icons
+- [x] Extract `DeckPanel.tsx` (header + track info + waveform + progress + tempo + mixer + controls)
+- [x] Extract `WaveformDisplay.tsx` (canvas renderer + VuMeter, HiDPI support)
+- [x] Extract `TempoStrip.tsx` (tempo slider, pitch range, nudge, SYNC, reset)
+- [x] Extract `MixerChannel.tsx` (EqKnob, MixerControls with gain/EQ/filter)
+- [x] Extract `ControlStrip.tsx` (grouped rows: Transport, Loop+FX, Performance)
+- [x] Extract `AiBar.tsx` (horizontal AI bar + SpectrumAnalyzer + TransitionsPanel + AutoDJ state machine)
+- [x] Rewrite `App.tsx` to import extracted components (2554 → 993 lines, 61% reduction)
+- [x] Add all new CSS classes to `index.css` (~730 lines)
+- [x] Remove AiDebugPanel from DJ view (absorbed into AiBar)
+- [x] Clean build verified (TypeScript + Vite)
+
+## Phase 43: UI Redesign — Visual Polish & Deck Redesign ✅
+- [x] Increase waveform height to 120px with better visual presence
+- [x] Large monospace BPM readout per deck (42px, hardware-inspired)
+- [x] Track title/artist get more space, playing state as glow badge
+- [x] Center mixer channel strip between decks (3-column grid: Deck A | Mixer | Deck B)
+- [x] Crossfader moved into center mixer with deck-colored labels
+- [x] Panel depth: gradient surfaces, shadows, layered feel for all panels
+- [x] Playing deck glow effect via `:has(.deck-state-badge.playing)`
+- [x] Album art thumbnail styling
+
+## Phase 44: UI Redesign — Control Grouping & Interaction Polish ✅
+- [x] DJButton primitive with consistent sizing, press feedback, radial hover effect
+- [x] Loop/Cue/FX/PERF rows get subtle panel backgrounds and group labels
+- [x] Active state polish: loop-active glow, armed cue highlight, playing deck border glow
+- [x] Hover/press microinteractions (scale transforms) for all interactive elements
+- [x] Transitions panel redesigned with gradient surface, spinner, progress bar
+- [x] Deck state badge pulse animation
+
+## Phase 45: UI Redesign — AI Bar & Final Integration ✅
+- [x] AI bar gradient surface with inset highlight
+- [x] Mode pill active state glow (cyan for manual/assisted, green for auto-DJ)
+- [x] Spectrum analyzer gradient bars with peak hold indicator
+- [x] AI thinking pulse animation
+- [x] Label hover glow (NOW cyan, NEXT amber)
+- [x] Responsive layout: 3 breakpoints (1200px, 960px, 720px)
+- [x] Visual harmonization: consistent tempo strip, slider transitions, scrollbar styling
+- [x] Press feedback on sync, nudge, EQ kill buttons
+
+## Phase 46: Performance FX-Driven Transitions
+
+Goal: Wire the existing FX action types (`EchoOut`, `ReverbTail`, `FilterSlam`, `VinylBrake`, `Spinback`) into heuristic transition templates. Currently defined as `MixActionKind` variants but never emitted by `build_heuristic_timeline`.
+
+- [ ] Add `inject_transition_fx()` helper that appends FX actions into existing template timelines
+- [ ] Wire FX per template: `echo_drop` → actual `EchoOut`, `backspin_cut` → `Spinback`/`VinylBrake`, `drop_swap` → `FilterSlam`, `break_blend` → `ReverbTail`, `loop_roll` → `BeatRepeat` with slip mode
+- [ ] Add personality-gated FX density (Lounge=rare, Smooth=occasional, Hype/Festival/Aggressive=heavy)
+- [ ] Add FX cooldown tracking (`recent_fx` on `AiPlanner`) — skip FX if same one used in last 2 transitions
+- [ ] Add FX stacking safety (no EchoOut + ReverbTail simultaneously, no VinylBrake + Spinback simultaneously)
+- [ ] Add new template `fx_echo_slam`: echo out → silence → filter slam incoming (scored high for energy jumps + Hype/Festival personality)
+- [ ] Update LLM system prompt with FX action documentation and parameter ranges
+- [ ] Tests: verify templates emit FX, verify cooldown prevents spam, verify no stacking conflicts
+
+## Phase 47: Vibe-Matched Transitions & Section Seeking
+
+Goal: Make the AI select tracks that match the current vibe and seek to the section in the incoming track that best matches what's currently playing, instead of always entering at intro/drop/first_beat.
+
+- [ ] Add `score_vibe()` to scorer with vibe flow rules (opener→warm_up=1.0, anthem→anthem=0.7, mismatched=0.2) and set-position bonuses
+- [ ] Add `weight_vibe: 0.10` to `AiConfig`, redistribute weights (key 0.25→0.20, variety 0.10→0.05)
+- [ ] Enhance `score_spectral()` to compare all 5 spectral dimensions (bass_energy, flatness, high_energy) not just centroid
+- [ ] Add scene compatibility bonus (matching ai_tags, groove types, complementary energy trajectories)
+- [ ] Upgrade `select_entry_point` to section-to-section similarity: compare energy + spectral + label compatibility between current outgoing section and each candidate section in incoming track
+- [ ] Add `section_average_energy()` helper in sections.rs for section-level energy comparison
+- [ ] Expose `spectral_bass_energy`, `spectral_flatness`, `spectral_high_energy`, `ai_tags` in AI context
+- [ ] Add `VibeMismatch` issue kind to quality evaluation regression suite
+- [ ] Tests: vibe scoring flow, spectral similarity weighting, section-seeking entry point selection
+
+## Phase 48: Track Recycling & Anthem Callbacks
+
+Goal: Allow the DJ to replay songs and bring back bangers. Currently `score_variety` hard-returns 0.0 for any recently played track.
+
+- [ ] Change `score_variety` from binary 0.0/1.0 to distance-based decay with vibe awareness (anthems can return after shorter cooldown than fillers)
+- [ ] Add `allow_replay: bool` and `anthem_callback_distance: usize` to `AiConfig`
+- [ ] Add anthem callback bonus in `select_next_extended`: at peak set position (>0.6), anthems past cooldown get +0.15 bonus
+- [ ] Add `track_play_counts: HashMap<String, usize>` to `AiPlanner` with hard cap of 3 plays per session
+- [ ] Callback transitions must use different section/FX for variety (don't re-enter at same point twice)
+- [ ] Update quality evaluation: `RepeatedTrack` severity conditional on replay setting, add `ExcessiveReplay` for >3 plays
+- [ ] Expose replay config in AI context for LLM awareness
+- [ ] Tests: recent replay blocked, distant anthem allowed, peak-time callback bonus, hard cap enforcement
+
+## Phase 49: Advanced Auto-Cueing & Mix Point Intelligence
+
+Goal: Upgrade auto-cues from basic section markers (intro/drop/break/outro/first_beat) to intelligent mix points.
+
+- [ ] Add `detect_vocal_curve()` returning per-window vocal presence values (reuses existing FFT logic)
+- [ ] Add `detect_vocal_free_zones()` — consecutive windows with vocal energy < threshold for 4+ windows
+- [ ] Add `detect_impact_moments()` — energy curve derivative spikes (sudden energy jumps), deduplicated within 4 seconds
+- [ ] Add `compute_best_mix_points()` — best mix-in (vocal-free, low energy, phrase-aligned) and best mix-out (near outro, pre-decline, phrase-aligned)
+- [ ] Integrate into analysis pipeline after existing `generate_auto_cues`, append new cue types
+- [ ] New cue types: `best_mix_in`, `best_mix_out`, `vocal_free_start`, `vocal_free_end`, `impact`
+- [ ] Use in entry point selection: prefer `best_mix_in` cue, use `vocal_free_start` when outgoing has vocals, use `impact` for drop_swap/echo_drop
+- [ ] Add `best_mix_out` as transition window (score 0.9), vocal-free zones as windows (0.75), impacts as windows (0.55)
+- [ ] Tests: vocal-free detection, impact detection, mix-in prefers vocal-free, mix-out near outro
 
