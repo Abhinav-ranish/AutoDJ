@@ -1123,6 +1123,8 @@ fn classify_llm_error(err: &AiError) -> &'static str {
             } else if lower.contains("ollama is not running") || lower.contains("connection refused")
             {
                 "provider_offline"
+            } else if lower.contains("model") && lower.contains("not found") {
+                "provider_error"
             } else {
                 "provider_error"
             }
