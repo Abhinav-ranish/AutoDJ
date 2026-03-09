@@ -10,10 +10,7 @@ pub trait TransitionTemplate {
 pub struct TransitionExpander;
 
 impl TransitionExpander {
-    pub fn expand(
-        template: &str,
-        params: &Value,
-    ) -> Result<Vec<ScheduledCommand>, String> {
+    pub fn expand(template: &str, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
         match template {
             "smooth_beatmix" => SmoothBeatmix.expand(params),
             "filter_sweep" => FilterSweep.expand(params),
@@ -24,6 +21,7 @@ impl TransitionExpander {
             "break_blend" => BreakBlend.expand(params),
             "backspin_cut" => BackspinCut.expand(params),
             "drop_ride" => DropRide.expand(params),
+            "fx_echo_slam" => FxEchoSlam.expand(params),
             _ => Err(format!("Unknown transition template: {template}")),
         }
     }
@@ -35,28 +33,45 @@ impl TransitionTemplate for SmoothBeatmix {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
         let duration_bars = params["duration_bars"].as_u64().unwrap_or(16) as u32;
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
-        let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
-        let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
         let bass_swap_bar = params["bass_swap_bar"].as_u64().unwrap_or(8) as u32;
 
         let mut commands = Vec::new();
 
         // 1. Initial State: Incoming deck plays silently
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: -96.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Play { deck: incoming_deck },
+            command: Command::Play {
+                deck: incoming_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         // Reset EQ
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: incoming_deck, band: EqBand::Low, gain_db: 0.0 },
+            command: Command::SetEq {
+                deck: incoming_deck,
+                band: EqBand::Low,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -71,7 +86,7 @@ impl TransitionTemplate for SmoothBeatmix {
             } else {
                 1.0 - (progress * 2.0)
             };
-            
+
             // Also ramp incoming gain up from silence to 0 dB in the first half of the transition
             let in_gain = if progress < 0.5 {
                 -96.0 + (progress * 2.0 * 96.0)
@@ -86,7 +101,10 @@ impl TransitionTemplate for SmoothBeatmix {
                 target_sample: None,
             });
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: incoming_deck, gain_db: in_gain },
+                command: Command::SetDeckGain {
+                    deck: incoming_deck,
+                    gain_db: in_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
@@ -95,13 +113,21 @@ impl TransitionTemplate for SmoothBeatmix {
 
         // 3. Bass swap at bass_swap_bar
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: outgoing_deck, band: EqBand::Low, gain_db: -96.0 },
+            command: Command::SetEq {
+                deck: outgoing_deck,
+                band: EqBand::Low,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(bass_swap_bar),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: incoming_deck, band: EqBand::Low, gain_db: 0.0 }, // If it was cut before
+            command: Command::SetEq {
+                deck: incoming_deck,
+                band: EqBand::Low,
+                gain_db: 0.0,
+            }, // If it was cut before
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(bass_swap_bar),
             target_sample: None,
@@ -109,14 +135,20 @@ impl TransitionTemplate for SmoothBeatmix {
 
         // 4. Finalize
         commands.push(ScheduledCommand {
-            command: Command::Pause { deck: outgoing_deck },
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
         // Reset outgoing EQ
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: outgoing_deck, band: EqBand::Low, gain_db: 0.0 },
+            command: Command::SetEq {
+                deck: outgoing_deck,
+                band: EqBand::Low,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
@@ -132,22 +164,35 @@ impl TransitionTemplate for FilterSweep {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
         let duration_bars = params["duration_bars"].as_u64().unwrap_or(8) as u32;
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
-        let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
-        let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
-        
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
+
         let start_hz = params["filter_start_hz"].as_f64().unwrap_or(200.0) as f32;
         let end_hz = params["filter_end_hz"].as_f64().unwrap_or(8000.0) as f32;
 
         let mut commands = Vec::new();
 
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: -96.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Play { deck: incoming_deck },
+            command: Command::Play {
+                deck: incoming_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -156,7 +201,7 @@ impl TransitionTemplate for FilterSweep {
         let total_beats = duration_bars * 4;
         for beat in 0..=total_beats {
             let progress = beat as f32 / total_beats as f32;
-            
+
             // Exponential sweep
             let log_start = start_hz.ln();
             let log_end = end_hz.ln();
@@ -164,7 +209,7 @@ impl TransitionTemplate for FilterSweep {
 
             // Incoming volume ramps up
             let in_gain = -96.0 + (progress * 96.0);
-            
+
             // Outgoing volume ramps down slightly
             let out_gain = -(progress * 12.0);
 
@@ -176,19 +221,29 @@ impl TransitionTemplate for FilterSweep {
             };
 
             commands.push(ScheduledCommand {
-                command: Command::SetFilter { deck: outgoing_deck, cutoff_hz: cutoff, resonance: 1.5 },
+                command: Command::SetFilter {
+                    deck: outgoing_deck,
+                    cutoff_hz: cutoff,
+                    resonance: 1.5,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
             });
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: incoming_deck, gain_db: in_gain },
+                command: Command::SetDeckGain {
+                    deck: incoming_deck,
+                    gain_db: in_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
             });
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: outgoing_deck, gain_db: out_gain },
+                command: Command::SetDeckGain {
+                    deck: outgoing_deck,
+                    gain_db: out_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
@@ -203,20 +258,29 @@ impl TransitionTemplate for FilterSweep {
 
         // Finalize
         commands.push(ScheduledCommand {
-            command: Command::Pause { deck: outgoing_deck },
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
         // Reset filters and gains
         commands.push(ScheduledCommand {
-            command: Command::SetFilter { deck: outgoing_deck, cutoff_hz: 20000.0, resonance: 1.0 },
+            command: Command::SetFilter {
+                deck: outgoing_deck,
+                cutoff_hz: 20000.0,
+                resonance: 1.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: outgoing_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
@@ -231,17 +295,28 @@ pub struct EchoDrop;
 impl TransitionTemplate for EchoDrop {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
-        let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
-        let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
-        
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
+
         let silence_beats = params["silence_beats"].as_u64().unwrap_or(4) as u32;
-        
-        // This simulates an echo drop (since we don't have an echo FX yet, 
-        // we'll just cut the outgoing volume exponentially and delay the incoming start)
+
+        // SIMULATED echo drop: uses exponential gain ramp + silence gap.
+        // No actual delay/echo DSP — the "echo tail" is a volume fade approximation.
         let mut commands = Vec::new();
 
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: outgoing_deck, gain_db: -12.0 },
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: -12.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -251,7 +326,10 @@ impl TransitionTemplate for EchoDrop {
         for beat in 1..=2 {
             let gain = -12.0 - (beat as f32 * 20.0);
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: outgoing_deck, gain_db: gain },
+                command: Command::SetDeckGain {
+                    deck: outgoing_deck,
+                    gain_db: gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
@@ -260,7 +338,9 @@ impl TransitionTemplate for EchoDrop {
 
         // Pause outgoing after the "echo"
         commands.push(ScheduledCommand {
-            command: Command::Pause { deck: outgoing_deck },
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(2),
             target_sample: None,
@@ -268,7 +348,11 @@ impl TransitionTemplate for EchoDrop {
 
         // Drop incoming after silence gap
         let drop_beat = silence_beats;
-        let final_cf = if incoming_deck == DeckId::B { 1.0 } else { -1.0 };
+        let final_cf = if incoming_deck == DeckId::B {
+            1.0
+        } else {
+            -1.0
+        };
 
         commands.push(ScheduledCommand {
             command: Command::SetCrossfader { position: final_cf },
@@ -277,19 +361,27 @@ impl TransitionTemplate for EchoDrop {
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Play { deck: incoming_deck },
+            command: Command::Play {
+                deck: incoming_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: outgoing_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
@@ -309,21 +401,34 @@ impl TransitionTemplate for DropSwap {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
         let buildup_bars = params["buildup_bars"].as_u64().unwrap_or(8) as u32;
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
-        let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
-        let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
 
         let mut commands = Vec::new();
         let buildup_beats = buildup_bars * 4;
 
         // Pre-roll incoming silently at the start
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: -96.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Play { deck: incoming_deck },
+            command: Command::Play {
+                deck: incoming_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -337,7 +442,11 @@ impl TransitionTemplate for DropSwap {
             let cutoff = (log_start + progress * (log_end - log_start)).exp();
 
             commands.push(ScheduledCommand {
-                command: Command::SetFilter { deck: outgoing_deck, cutoff_hz: cutoff, resonance: 1.2 },
+                command: Command::SetFilter {
+                    deck: outgoing_deck,
+                    cutoff_hz: cutoff,
+                    resonance: 1.2,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
@@ -346,10 +455,16 @@ impl TransitionTemplate for DropSwap {
 
         // At the drop: hard cut — kill outgoing, full incoming
         let drop_beat = buildup_beats;
-        let final_cf = if incoming_deck == DeckId::B { 1.0 } else { -1.0 };
+        let final_cf = if incoming_deck == DeckId::B {
+            1.0
+        } else {
+            -1.0
+        };
 
         commands.push(ScheduledCommand {
-            command: Command::Pause { deck: outgoing_deck },
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
@@ -361,20 +476,30 @@ impl TransitionTemplate for DropSwap {
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
         });
         // Reset outgoing filter
         commands.push(ScheduledCommand {
-            command: Command::SetFilter { deck: outgoing_deck, cutoff_hz: 20000.0, resonance: 1.0 },
+            command: Command::SetFilter {
+                deck: outgoing_deck,
+                cutoff_hz: 20000.0,
+                resonance: 1.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: outgoing_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
@@ -390,20 +515,33 @@ pub struct LoopRoll;
 impl TransitionTemplate for LoopRoll {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
-        let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
-        let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
 
         let mut commands = Vec::new();
 
         // Pre-roll incoming silently
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: -96.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Play { deck: incoming_deck },
+            command: Command::Play {
+                deck: incoming_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -414,7 +552,11 @@ impl TransitionTemplate for LoopRoll {
 
         // Step 1: 4-bar loop on outgoing (starts at bar 0, held for 4 bars = 16 beats)
         commands.push(ScheduledCommand {
-            command: Command::SetLoop { deck: outgoing_deck, start_beat: 0, length_bars: 4 },
+            command: Command::SetLoop {
+                deck: outgoing_deck,
+                start_beat: 0,
+                length_bars: 4,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -422,7 +564,11 @@ impl TransitionTemplate for LoopRoll {
 
         // Step 2: After 4 bars (16 beats), switch to 2-bar loop
         commands.push(ScheduledCommand {
-            command: Command::SetLoop { deck: outgoing_deck, start_beat: 0, length_bars: 2 },
+            command: Command::SetLoop {
+                deck: outgoing_deck,
+                start_beat: 0,
+                length_bars: 2,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(4),
             target_sample: None,
@@ -430,7 +576,11 @@ impl TransitionTemplate for LoopRoll {
 
         // Step 3: After 6 bars (24 beats), switch to 1-bar loop
         commands.push(ScheduledCommand {
-            command: Command::SetLoop { deck: outgoing_deck, start_beat: 0, length_bars: 1 },
+            command: Command::SetLoop {
+                deck: outgoing_deck,
+                start_beat: 0,
+                length_bars: 1,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(6),
             target_sample: None,
@@ -438,16 +588,24 @@ impl TransitionTemplate for LoopRoll {
 
         // Step 4: After 7 bars (28 beats), clear loop and cut to incoming
         let cut_beat = 28;
-        let final_cf = if incoming_deck == DeckId::B { 1.0 } else { -1.0 };
+        let final_cf = if incoming_deck == DeckId::B {
+            1.0
+        } else {
+            -1.0
+        };
 
         commands.push(ScheduledCommand {
-            command: Command::ClearLoop { deck: outgoing_deck },
+            command: Command::ClearLoop {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(cut_beat),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Pause { deck: outgoing_deck },
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(cut_beat),
             target_sample: None,
@@ -459,13 +617,19 @@ impl TransitionTemplate for LoopRoll {
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(cut_beat),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: outgoing_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(cut_beat),
             target_sample: None,
@@ -484,26 +648,43 @@ impl TransitionTemplate for BassKillSwap {
         let duration_bars = params["duration_bars"].as_u64().unwrap_or(16) as u32;
         let bass_swap_bar = params["bass_swap_bar"].as_u64().unwrap_or(4) as u32;
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
-        let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
-        let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
 
         let mut commands = Vec::new();
 
         // Start incoming silently with bass killed
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: -96.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: incoming_deck, band: EqBand::Low, gain_db: -96.0 },
+            command: Command::SetEq {
+                deck: incoming_deck,
+                band: EqBand::Low,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Play { deck: incoming_deck },
+            command: Command::Play {
+                deck: incoming_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -515,7 +696,10 @@ impl TransitionTemplate for BassKillSwap {
             let progress = beat as f32 / ramp_beats as f32;
             let in_gain = -96.0 + progress * 96.0;
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: incoming_deck, gain_db: in_gain },
+                command: Command::SetDeckGain {
+                    deck: incoming_deck,
+                    gain_db: in_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
@@ -524,13 +708,21 @@ impl TransitionTemplate for BassKillSwap {
 
         // Bass swap: kill outgoing bass, restore incoming bass
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: outgoing_deck, band: EqBand::Low, gain_db: -96.0 },
+            command: Command::SetEq {
+                deck: outgoing_deck,
+                band: EqBand::Low,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(bass_swap_bar),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: incoming_deck, band: EqBand::Low, gain_db: 0.0 },
+            command: Command::SetEq {
+                deck: incoming_deck,
+                band: EqBand::Low,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(bass_swap_bar),
             target_sample: None,
@@ -543,7 +735,10 @@ impl TransitionTemplate for BassKillSwap {
             let progress = beat as f32 / remaining_beats as f32;
             let out_gain = -(progress * 96.0);
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: outgoing_deck, gain_db: out_gain },
+                command: Command::SetDeckGain {
+                    deck: outgoing_deck,
+                    gain_db: out_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(fade_start_beat + beat),
                 target_sample: None,
@@ -551,7 +746,11 @@ impl TransitionTemplate for BassKillSwap {
         }
 
         // Crossfader to incoming side
-        let final_cf = if incoming_deck == DeckId::B { 1.0 } else { -1.0 };
+        let final_cf = if incoming_deck == DeckId::B {
+            1.0
+        } else {
+            -1.0
+        };
         commands.push(ScheduledCommand {
             command: Command::SetCrossfader { position: final_cf },
             source: CommandSource::System,
@@ -561,19 +760,28 @@ impl TransitionTemplate for BassKillSwap {
 
         // Finalize: pause outgoing, reset EQ
         commands.push(ScheduledCommand {
-            command: Command::Pause { deck: outgoing_deck },
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: outgoing_deck, band: EqBand::Low, gain_db: 0.0 },
+            command: Command::SetEq {
+                deck: outgoing_deck,
+                band: EqBand::Low,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: outgoing_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
@@ -591,27 +799,44 @@ impl TransitionTemplate for BreakBlend {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
         let duration_bars = params["duration_bars"].as_u64().unwrap_or(16) as u32;
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
-        let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
-        let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
 
         let mut commands = Vec::new();
         let total_beats = duration_bars * 4;
 
         // Start incoming silently with HP filter engaged (no bass clash)
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: -96.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetFilter { deck: incoming_deck, cutoff_hz: 400.0, resonance: 0.8 },
+            command: Command::SetFilter {
+                deck: incoming_deck,
+                cutoff_hz: 400.0,
+                resonance: 0.8,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Play { deck: incoming_deck },
+            command: Command::Play {
+                deck: incoming_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -629,28 +854,46 @@ impl TransitionTemplate for BreakBlend {
 
             // Outgoing: gentle volume fade + mid/high EQ reduction in second half
             let out_gain = -(progress * progress * 24.0); // quadratic fade, gentler start
-            let out_mid_db = if progress > 0.5 { -((progress - 0.5) * 2.0 * 12.0) } else { 0.0 };
+            let out_mid_db = if progress > 0.5 {
+                -((progress - 0.5) * 2.0 * 12.0)
+            } else {
+                0.0
+            };
 
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: incoming_deck, gain_db: in_gain },
+                command: Command::SetDeckGain {
+                    deck: incoming_deck,
+                    gain_db: in_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
             });
             commands.push(ScheduledCommand {
-                command: Command::SetFilter { deck: incoming_deck, cutoff_hz: in_cutoff, resonance: 0.8 },
+                command: Command::SetFilter {
+                    deck: incoming_deck,
+                    cutoff_hz: in_cutoff,
+                    resonance: 0.8,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
             });
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: outgoing_deck, gain_db: out_gain },
+                command: Command::SetDeckGain {
+                    deck: outgoing_deck,
+                    gain_db: out_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
             });
             commands.push(ScheduledCommand {
-                command: Command::SetEq { deck: outgoing_deck, band: EqBand::Mid, gain_db: out_mid_db },
+                command: Command::SetEq {
+                    deck: outgoing_deck,
+                    band: EqBand::Mid,
+                    gain_db: out_mid_db,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
@@ -658,9 +901,15 @@ impl TransitionTemplate for BreakBlend {
         }
 
         // Finalize
-        let final_cf = if incoming_deck == DeckId::B { 1.0 } else { -1.0 };
+        let final_cf = if incoming_deck == DeckId::B {
+            1.0
+        } else {
+            -1.0
+        };
         commands.push(ScheduledCommand {
-            command: Command::Pause { deck: outgoing_deck },
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
@@ -673,25 +922,40 @@ impl TransitionTemplate for BreakBlend {
         });
         // Reset filters, EQ, gains
         commands.push(ScheduledCommand {
-            command: Command::SetFilter { deck: outgoing_deck, cutoff_hz: 20000.0, resonance: 1.0 },
+            command: Command::SetFilter {
+                deck: outgoing_deck,
+                cutoff_hz: 20000.0,
+                resonance: 1.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetFilter { deck: incoming_deck, cutoff_hz: 20000.0, resonance: 1.0 },
+            command: Command::SetFilter {
+                deck: incoming_deck,
+                cutoff_hz: 20000.0,
+                resonance: 1.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: outgoing_deck, band: EqBand::Mid, gain_db: 0.0 },
+            command: Command::SetEq {
+                deck: outgoing_deck,
+                band: EqBand::Mid,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: outgoing_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
@@ -703,26 +967,41 @@ impl TransitionTemplate for BreakBlend {
 
 /// BackspinCut: Simulated backspin (rapid gain drop + filter close) on
 /// outgoing deck, brief silence gap, then hard cut to incoming.
+/// NOTE: This is a gain/filter approximation, not a real vinyl reverse.
+/// For real reverse playback, use the Spinback engine command directly.
 pub struct BackspinCut;
 
 impl TransitionTemplate for BackspinCut {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
-        let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
-        let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
         let backspin_beats = params["backspin_beats"].as_u64().unwrap_or(4) as u32;
 
         let mut commands = Vec::new();
 
         // Pre-roll incoming silently
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: -96.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Play { deck: incoming_deck },
+            command: Command::Play {
+                deck: incoming_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -735,13 +1014,20 @@ impl TransitionTemplate for BackspinCut {
             let cutoff = 20000.0 * (1.0 - progress).max(0.01);
 
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: outgoing_deck, gain_db: out_gain },
+                command: Command::SetDeckGain {
+                    deck: outgoing_deck,
+                    gain_db: out_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
             });
             commands.push(ScheduledCommand {
-                command: Command::SetFilter { deck: outgoing_deck, cutoff_hz: cutoff, resonance: 1.5 },
+                command: Command::SetFilter {
+                    deck: outgoing_deck,
+                    cutoff_hz: cutoff,
+                    resonance: 1.5,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
@@ -750,7 +1036,9 @@ impl TransitionTemplate for BackspinCut {
 
         // Kill outgoing
         commands.push(ScheduledCommand {
-            command: Command::Pause { deck: outgoing_deck },
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(backspin_beats),
             target_sample: None,
@@ -758,7 +1046,11 @@ impl TransitionTemplate for BackspinCut {
 
         // Hard cut to incoming after 2-beat silence gap
         let drop_beat = backspin_beats + 2;
-        let final_cf = if incoming_deck == DeckId::B { 1.0 } else { -1.0 };
+        let final_cf = if incoming_deck == DeckId::B {
+            1.0
+        } else {
+            -1.0
+        };
 
         commands.push(ScheduledCommand {
             command: Command::SetCrossfader { position: final_cf },
@@ -767,19 +1059,29 @@ impl TransitionTemplate for BackspinCut {
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetFilter { deck: outgoing_deck, cutoff_hz: 20000.0, resonance: 1.0 },
+            command: Command::SetFilter {
+                deck: outgoing_deck,
+                cutoff_hz: 20000.0,
+                resonance: 1.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: outgoing_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
@@ -797,8 +1099,16 @@ impl TransitionTemplate for DropRide {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
         let duration_bars = params["duration_bars"].as_u64().unwrap_or(8) as u32;
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
-        let incoming_deck = if incoming_deck_str == "A" { DeckId::A } else { DeckId::B };
-        let outgoing_deck = if incoming_deck == DeckId::A { DeckId::B } else { DeckId::A };
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
         let bass_swap_bar = params["bass_swap_bar"].as_u64().unwrap_or(2) as u32;
 
         let mut commands = Vec::new();
@@ -806,19 +1116,28 @@ impl TransitionTemplate for DropRide {
 
         // Start incoming at moderate volume with bass killed (ride the highs/mids)
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: incoming_deck, gain_db: -12.0 },
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: -12.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: incoming_deck, band: EqBand::Low, gain_db: -96.0 },
+            command: Command::SetEq {
+                deck: incoming_deck,
+                band: EqBand::Low,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::Play { deck: incoming_deck },
+            command: Command::Play {
+                deck: incoming_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
@@ -830,7 +1149,10 @@ impl TransitionTemplate for DropRide {
             let progress = beat as f32 / ramp_beats as f32;
             let in_gain = -12.0 + 12.0 * progress;
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: incoming_deck, gain_db: in_gain },
+                command: Command::SetDeckGain {
+                    deck: incoming_deck,
+                    gain_db: in_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(beat),
                 target_sample: None,
@@ -839,13 +1161,21 @@ impl TransitionTemplate for DropRide {
 
         // Bass swap at bass_swap_bar
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: outgoing_deck, band: EqBand::Low, gain_db: -96.0 },
+            command: Command::SetEq {
+                deck: outgoing_deck,
+                band: EqBand::Low,
+                gain_db: -96.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(bass_swap_bar),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: incoming_deck, band: EqBand::Low, gain_db: 0.0 },
+            command: Command::SetEq {
+                deck: incoming_deck,
+                band: EqBand::Low,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(bass_swap_bar),
             target_sample: None,
@@ -859,7 +1189,10 @@ impl TransitionTemplate for DropRide {
             let s = progress * progress * (3.0 - 2.0 * progress);
             let out_gain = -(s * 48.0);
             commands.push(ScheduledCommand {
-                command: Command::SetDeckGain { deck: outgoing_deck, gain_db: out_gain },
+                command: Command::SetDeckGain {
+                    deck: outgoing_deck,
+                    gain_db: out_gain,
+                },
                 source: CommandSource::System,
                 schedule: SchedulePoint::AfterBeats(fade_start_beat + beat),
                 target_sample: None,
@@ -867,9 +1200,15 @@ impl TransitionTemplate for DropRide {
         }
 
         // Finalize
-        let final_cf = if incoming_deck == DeckId::B { 1.0 } else { -1.0 };
+        let final_cf = if incoming_deck == DeckId::B {
+            1.0
+        } else {
+            -1.0
+        };
         commands.push(ScheduledCommand {
-            command: Command::Pause { deck: outgoing_deck },
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
@@ -881,18 +1220,202 @@ impl TransitionTemplate for DropRide {
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetEq { deck: outgoing_deck, band: EqBand::Low, gain_db: 0.0 },
+            command: Command::SetEq {
+                deck: outgoing_deck,
+                band: EqBand::Low,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain { deck: outgoing_deck, gain_db: 0.0 },
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: 0.0,
+            },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBars(duration_bars),
             target_sample: None,
         });
 
         Ok(commands)
+    }
+}
+
+/// FxEchoSlam: Simulated echo-out + silence gap + incoming filter slam.
+/// This is an app-layer approximation (gain/filter choreography), not true delay DSP.
+pub struct FxEchoSlam;
+
+impl TransitionTemplate for FxEchoSlam {
+    fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
+        let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
+        let incoming_deck = if incoming_deck_str == "A" {
+            DeckId::A
+        } else {
+            DeckId::B
+        };
+        let outgoing_deck = if incoming_deck == DeckId::A {
+            DeckId::B
+        } else {
+            DeckId::A
+        };
+
+        let echo_bars = params["duration_bars"].as_u64().unwrap_or(4) as u32;
+        let silence_beats = params["silence_beats"].as_u64().unwrap_or(4) as u32;
+        let echo_beats = echo_bars * 4;
+
+        let mut commands = Vec::new();
+
+        // Keep incoming running silently so the slam can hit on time.
+        commands.push(ScheduledCommand {
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: -96.0,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::NextBar,
+            target_sample: None,
+        });
+        commands.push(ScheduledCommand {
+            command: Command::Play {
+                deck: incoming_deck,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::NextBar,
+            target_sample: None,
+        });
+
+        // Simulated echo tail on outgoing deck using exponential gain decay.
+        commands.push(ScheduledCommand {
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: -12.0,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::NextBar,
+            target_sample: None,
+        });
+        for beat in 1..=echo_beats {
+            let progress = beat as f32 / echo_beats as f32;
+            let out_gain = -12.0 - 48.0 * progress * progress;
+            commands.push(ScheduledCommand {
+                command: Command::SetDeckGain {
+                    deck: outgoing_deck,
+                    gain_db: out_gain,
+                },
+                source: CommandSource::System,
+                schedule: SchedulePoint::AfterBeats(beat),
+                target_sample: None,
+            });
+        }
+
+        // Kill outgoing after the simulated echo tail.
+        commands.push(ScheduledCommand {
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(echo_beats),
+            target_sample: None,
+        });
+
+        // Slam incoming after a short silence gap.
+        let slam_beat = echo_beats + silence_beats;
+        let final_cf = if incoming_deck == DeckId::B {
+            1.0
+        } else {
+            -1.0
+        };
+        commands.push(ScheduledCommand {
+            command: Command::SetFilter {
+                deck: incoming_deck,
+                cutoff_hz: 800.0,
+                resonance: 1.6,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(slam_beat),
+            target_sample: None,
+        });
+        commands.push(ScheduledCommand {
+            command: Command::SetCrossfader { position: final_cf },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(slam_beat),
+            target_sample: None,
+        });
+        commands.push(ScheduledCommand {
+            command: Command::SetDeckGain {
+                deck: incoming_deck,
+                gain_db: 0.0,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(slam_beat),
+            target_sample: None,
+        });
+        commands.push(ScheduledCommand {
+            command: Command::SetFilter {
+                deck: incoming_deck,
+                cutoff_hz: 20000.0,
+                resonance: 0.8,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(slam_beat + 1),
+            target_sample: None,
+        });
+
+        // Cleanup outgoing gain.
+        commands.push(ScheduledCommand {
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: 0.0,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(slam_beat + 1),
+            target_sample: None,
+        });
+
+        Ok(commands)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fx_echo_slam_template_expands() {
+        let params = serde_json::json!({
+            "incoming_deck": "B",
+            "duration_bars": 4
+        });
+        let commands = TransitionExpander::expand("fx_echo_slam", &params)
+            .expect("fx_echo_slam should expand");
+        assert!(
+            !commands.is_empty(),
+            "fx_echo_slam expansion should emit commands"
+        );
+    }
+
+    #[test]
+    fn fx_echo_slam_contains_pause_and_filter_slam_shape() {
+        let params = serde_json::json!({
+            "incoming_deck": "A",
+            "duration_bars": 4,
+            "silence_beats": 4
+        });
+        let commands = TransitionExpander::expand("fx_echo_slam", &params)
+            .expect("fx_echo_slam should expand");
+
+        let has_pause = commands
+            .iter()
+            .any(|cmd| matches!(cmd.command, Command::Pause { .. }));
+        let has_filter = commands
+            .iter()
+            .any(|cmd| matches!(cmd.command, Command::SetFilter { .. }));
+        assert!(has_pause, "fx_echo_slam should pause outgoing deck");
+        assert!(
+            has_filter,
+            "fx_echo_slam should include filter slam/reset commands"
+        );
     }
 }

@@ -25,7 +25,7 @@ pub struct AiConfig {
     pub endpoint_url: Option<String>,
     pub timeout_seconds: u32,
     pub prompt_template: Option<String>,
-    
+
     // Heuristic Weights (8 dimensions, should sum to ~1.0)
     pub weight_tempo: f64,
     pub weight_key: f64,
@@ -37,6 +37,10 @@ pub struct AiConfig {
     /// Phase 47: Weight for vibe compatibility scoring (opener/anthem/filler/etc.)
     #[serde(default = "default_weight_vibe")]
     pub weight_vibe: f64,
+    /// Phase 50: Weight for vocal compatibility in track selection.
+    /// Penalizes selecting a vocal-heavy track when current is also vocal-heavy.
+    #[serde(default = "default_weight_vocal")]
+    pub weight_vocal: f64,
 
     /// Phase 48: Allow replaying tracks in a set (anthem callbacks).
     #[serde(default)]
@@ -52,6 +56,10 @@ fn default_provider() -> String {
 
 fn default_weight_vibe() -> f64 {
     0.10
+}
+
+fn default_weight_vocal() -> f64 {
+    0.05
 }
 
 fn default_anthem_callback_distance() -> usize {
@@ -76,6 +84,7 @@ impl Default for AiConfig {
             weight_mood: 0.10,
             weight_spectral: 0.05,
             weight_vibe: 0.10,
+            weight_vocal: 0.05,
             allow_replay: false,
             anthem_callback_distance: 5,
         }
