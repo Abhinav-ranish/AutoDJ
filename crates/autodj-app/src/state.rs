@@ -1,12 +1,13 @@
 //! App state shared across Tauri commands.
 
+use crate::conductor::ConductorState;
+use autodj_ai::{planner::AiPlanner, AiConfig};
 use autodj_core::buffer::TrackBuffer;
 use autodj_core::command::{Command, CommandSource, DeckId};
 use autodj_core::engine::{AudioEngine, EngineStateSnapshot, TrackLoader};
 use autodj_core::recorder::{self, RecordConsumer, RecordingFlag};
 use autodj_storage::cache::CacheManager;
 use autodj_storage::db::Database;
-use autodj_ai::{AiConfig, planner::AiPlanner};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -33,6 +34,8 @@ pub struct AppState {
     pub record_consumer: Mutex<Option<RecordConsumer>>,
     pub data_dir: PathBuf,
     pub sample_rate: u32,
+    /// Backend conductor state — owns the AutoDJ loop.
+    pub conductor: tokio::sync::RwLock<ConductorState>,
 }
 
 impl AppState {
@@ -45,12 +48,11 @@ impl AppState {
 
         // Initialize database
         let db_path = data_dir.join("autodj.db");
-        let db = Database::open(&db_path)
-            .map_err(|e| format!("Failed to open database: {e}"))?;
+        let db = Database::open(&db_path).map_err(|e| format!("Failed to open database: {e}"))?;
 
         // Initialize cache
-        let cache = CacheManager::new(&data_dir)
-            .map_err(|e| format!("Failed to init cache: {e}"))?;
+        let cache =
+            CacheManager::new(&data_dir).map_err(|e| format!("Failed to init cache: {e}"))?;
 
         // Create track loader FIRST (engine needs the receiver)
         let (loader, load_receiver) = autodj_core::engine::create_track_loader();
@@ -82,6 +84,7 @@ impl AppState {
             record_consumer: Mutex::new(Some(rec_consumer)),
             data_dir,
             sample_rate,
+            conductor: tokio::sync::RwLock::new(ConductorState::default()),
         })
     }
 
@@ -122,27 +125,45 @@ fn dirs_data_dir() -> PathBuf {
         .join(".autodj")
 }
 
-/// Build an AiConfig from environment variables (AI_PROVIDER, GEMINI_API_KEY, GROQ_API_KEY).
+/// Build an AiConfig from environment variables (AI_PROVIDER, GEMINI_API_KEY, GROQ_API_KEY, OLLAMA_MODEL).
 fn ai_config_from_env() -> AiConfig {
     let provider = std::env::var("AI_PROVIDER")
         .unwrap_or_else(|_| "gemini".to_string())
         .to_lowercase();
 
-    let (api_key, model, endpoint) = match provider.as_str() {
+    let (api_key, model, endpoint, enabled) = match provider.as_str() {
         "groq" => (
-            std::env::var("GROQ_API_KEY").ok().filter(|k| !k.is_empty() && !k.starts_with("gsk_...")),
+            std::env::var("GROQ_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty() && !k.starts_with("gsk_...")),
             "llama-3.3-70b-versatile".to_string(),
             Some("https://api.groq.com/openai/v1".to_string()),
+            None, // enabled derived from api_key presence
         ),
+        "ollama" => {
+            let model = std::env::var("OLLAMA_MODEL")
+                .unwrap_or_else(|_| "qwen2.5:7b".to_string());
+            let endpoint = std::env::var("OLLAMA_ENDPOINT")
+                .unwrap_or_else(|_| "http://localhost:11434/v1".to_string());
+            (
+                None, // no API key needed for local Ollama
+                model,
+                Some(endpoint),
+                Some(true), // always enabled — Ollama is local, no key needed
+            )
+        }
         _ => (
-            std::env::var("GEMINI_API_KEY").ok().filter(|k| !k.is_empty() && !k.starts_with("AIzaSy...")),
+            std::env::var("GEMINI_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty() && !k.starts_with("AIzaSy...")),
             "gemini-2.5-flash".to_string(),
             Some("https://generativelanguage.googleapis.com/v1beta/models".to_string()),
+            None,
         ),
     };
 
     AiConfig {
-        enabled: api_key.is_some(),
+        enabled: enabled.unwrap_or(api_key.is_some()),
         provider,
         model,
         api_key,
