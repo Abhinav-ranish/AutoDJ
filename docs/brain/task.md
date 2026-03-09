@@ -325,7 +325,39 @@ Goal: AI doesn’t touch EQ because it has too few “safe” knobs + no structu
 - [x] Buffer underrun counter + logging
 - [ ] Crash-safe session recovery (persist playback state, resume on relaunch) — deferred
 
-## Phase 26: Real-time Metering & Beat Tracking
+## Phase 26: Transition Diversity & Fade Quality
+
+Goal: Fix the AI's heavy bias toward `smooth_beatmix` and improve fade-in/fade-out quality across all transitions. Make the heuristic planner section-aware, drop-aware, and capable of selecting the full template palette.
+
+* [ ] **Fix template selection bias in heuristic planner**
+  * [ ] Use section proximity (near drop → `drop_swap`; near breakdown → `break_blend`/`filter_sweep`)
+  * [ ] Use energy trajectory: "building" → `filter_sweep`/`drop_swap`; "declining" → `break_blend`
+  * [ ] Use rhythm complexity/danceability: high complexity → `loop_roll`; groovy → `bass_kill_swap`
+  * [ ] Add randomized variety: when multiple templates score similarly, pick randomly instead of defaulting
+  * [ ] Lower the energy thresholds so more tracks trigger non-default templates
+
+* [ ] **Improve fade curves in action timelines**
+  * [ ] Replace linear dB ramps with equal-power / S-curve crossfades (perceptually smooth)
+  * [ ] Start incoming gain at -40 dB (audible sooner) instead of -60 dB (inaudible for most of ramp)
+  * [ ] Add crossfader movement to `smooth_beatmix` and `bass_kill_swap` timelines
+  * [ ] Outgoing fade starts earlier (bar 4 of 16 instead of bar 8) for longer, gentler exit
+  * [ ] Add gain compensation: slight boost at crossover point to prevent volume dip
+
+* [ ] **New transition template: `BackspinCut`**
+  * [ ] Simulated backspin: rapid pitch sweep down on outgoing → silence → hard cut to incoming
+  * [ ] Timeline: ramp outgoing gain down with filter sweep over 2 bars, then cut
+
+* [ ] **New transition template: `DropRide`**
+  * [ ] Blend incoming track starting from its drop cue, riding both drops simultaneously
+  * [ ] Timeline: bass-swap during dual-drop, outgoing fades over 8 bars
+
+* [ ] **Section-aware template scoring function**
+  * [ ] Score each template against current section context and pick the best fit
+  * [ ] Factor in: section proximity, energy delta, genre change, vocal overlap, rhythm profile
+
+---
+
+## Phase 27: Real-time Metering & Beat Tracking
 - [ ] Replace synthetic beat grid with DP beat tracker (Ellis 2007)
 - [ ] Real-time RMS/peak level meters per deck + master (UI VU meters)
 - [ ] Spectrum analyzer visualization (FFT-based, per-deck or master)
