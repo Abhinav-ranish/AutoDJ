@@ -600,3 +600,41 @@ Goal: Upgrade auto-cues from basic section markers (intro/drop/break/outro/first
 - [x] Add `best_mix_out` as transition window (score 0.9), vocal-free zones as windows (0.75), impacts as windows (0.55)
 - [x] Tests: vocal-free detection, impact detection, mix-in prefers vocal-free, mix-out near outro
 
+
+## Phase 50: Backend Runtime Follow-up ✅
+- [x] Moved/kept AutoDJ conductor ownership on backend runtime (`crates/autodj-app/src/conductor.rs`)
+- [x] Added structured runtime truth (`trigger_meta`, `decision_meta`) to conductor snapshots/debug
+- [x] Improved fallback provenance visibility (queue/runtime fallback/planner error paths)
+- [x] Fed runtime outcomes back into planner memory for anti-repetition (`template/track/artist/fx`)
+- [x] Implemented `fx_echo_slam` in transition expander and marked simulated-template truth
+- [x] Frontend typings/fallback labels updated to consume new backend runtime truth
+
+## Phase 51: Frontend Reality-Audit Follow-up ✅
+- [x] Added frontend follow-up plan note from reality audit in `docs/plans/2026-03-09-frontend-followup-from-reality-audit.md`
+- [x] Updated conductor rail to be backend-conductor-state-first (React no longer owns AutoDJ loop behavior in the UI layer)
+- [x] Reframed decision source/fallback labels to honest runtime truth (`LLM advisory` vs `Heuristic scorer` vs `Queue driven`)
+- [x] Added explicit simulated-template signaling in transition UX (`(Sim)`, `SIM`, `SIMULATED`) to avoid overstating FX depth
+- [x] Strengthened marker-aware messaging: conductor transition intent + deck-level mix window state (`MIX WINDOW LIVE` / next-window countdown)
+- [x] Improved performance-first readability: active/standby deck state chips, stronger on-air deck emphasis, clearer NOW/NEXT/WHY-NOW flow
+- [x] Increased center mixer authority with live master-side readout and crossfader position context
+- [x] Reduced misleading control language (tempo nudge clarified as BPM-only; control strip truth note for real primitives)
+
+## Phase 52: Ollama Local LLM Integration ✅
+
+Goal: Add Ollama as a local LLM provider so the AI DJ can run without cloud API keys or costs.
+
+- [x] Add `query_ollama()` to `LlmClient` in `llm.rs` — OpenAI-compatible API at `localhost:11434/v1`
+- [x] No API key required, auto-detect "Ollama not running" errors with helpful message
+- [x] Longer default timeout (30s min) since local inference can be slower than cloud
+- [x] Route `"ollama"` provider in `query()` match
+- [x] Update `ai_config_from_env()` in `state.rs` to handle `AI_PROVIDER=ollama`
+- [x] Support `OLLAMA_MODEL` and `OLLAMA_ENDPOINT` env vars (defaults: `qwen2.5:7b`, `http://localhost:11434/v1`)
+- [x] Ollama enabled without API key (local, always available when Ollama is running)
+- [x] Fix planner `api_key.is_none()` gate to skip API key check for Ollama provider
+- [x] Add `provider_offline` error classification for connection refused errors
+- [x] Update `.env.example` with Ollama configuration section
+- [x] Pulled `qwen2.5:7b` model (4.7GB) — excellent structured JSON output, fast on Apple Silicon
+- [x] Add Ollama to Settings UI: 3-way provider toggle (Gemini / Groq / Ollama) with green highlight
+- [x] Ollama settings panel: editable model name + endpoint fields, no API key needed
+- [x] Save button active immediately for Ollama (no key required), shows "Save Ollama Config"
+- [x] Help text shows `ollama pull <model>` command for easy setup

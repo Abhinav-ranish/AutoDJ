@@ -245,3 +245,7 @@ All code quality items resolved in commits `ddfdfa4`–`817eff6`:
 | **MIDI controller support** | Use `midir` crate; map MIDI CC/note events to `Command` sends |
 | **Key shift / harmonic pitch lock** | Pitch-shift without tempo change (rubber-band or phase vocoder) |
 | **Playlist / crate management** | DB schema additions + side-panel UI for organizing tracks |
+
+## Phase 50 Status ✅
+- Fixed/finished in this phase: backend conductor truth visibility, fallback provenance, runtime memory feedback, and `fx_echo_slam` runtime support.
+- Remaining gaps listed above are still the active follow-up set.

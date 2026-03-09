@@ -100,3 +100,6 @@ New tests:
 1. `cargo tauri dev` → load track → set 4-bar loop → hear it repeat
 2. Load second track → press SYNC → tempos match
 3. Schedule a command on NextBar → verify it executes on the downbeat
+
+## Milestone C Status ✅
+- Finished.

@@ -105,3 +105,6 @@ New tests:
 4. Sweep filter knob → hear HP/LP sweep
 5. Adjust deck gain slider → volume changes
 6. Load second track on Deck B → crossfade between them
+
+## Milestone B Status ✅
+- Finished.

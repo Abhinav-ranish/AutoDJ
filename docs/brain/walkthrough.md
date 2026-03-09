@@ -143,3 +143,9 @@ Here is a recording showing the functional React frontend for Auto-DJ:
 - **User Feedback Storage** (`db.rs`): New `transition_feedback` table (session_id, from/to track, template, rating 1-5, notes, full decision JSON). `save_transition_feedback()` method for learning hooks.
 - **Tauri Commands** (`commands.rs` + `lib.rs`): 5 new commands registered: `set_eq_kill`, `set_eq_mode`, `seek_ms`, `get_auto_cues`, `submit_transition_feedback`.
 - **UI Updates** (`App.tsx` + `store.ts`): EQ kill buttons wired to `setEqKill` store action. AI debug panel shows reasoning tags as badges, confidence percentage, and action timeline preview (first 6 actions with kind + timestamp). All 7 transition templates in dropdown selector. `MixAction` interface + 5 new store actions added.
+
+## Phase 50: Backend Runtime Follow-up ✅
+- Backend conductor now exposes structured trigger and decision metadata for runtime explainability.
+- `get_ai_debug_info` includes structured conductor trigger/decision objects.
+- Runtime now records template/track/artist/FX usage back into planner memory.
+- `fx_echo_slam` is now implemented in transition expansion and treated as a simulated effect.

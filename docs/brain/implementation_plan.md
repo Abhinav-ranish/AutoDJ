@@ -280,3 +280,10 @@ Transition the AI conductor engine to utilize the Gemini API natively and expand
 
 #### [MODIFY] `ui/src/store.ts` & Front-end Config
 - Update the Configuration menu so the user specifically provides a Gemini API Key rather than the default OpenAI Key prompt.
+
+## Phase 50: Backend Runtime Follow-up ✅
+- Completed: structured conductor metadata (`ConductorTriggerMeta`, `ConductorDecisionMeta`) and snapshot/debug plumbing.
+- Completed: non-LLM path truth persistence for queue/fallback/emergency/silence decision paths.
+- Completed: runtime memory feedback into planner anti-repetition state.
+- Completed: `fx_echo_slam` transition template runtime implementation.
+- Not part of this phase: true delay/reverb/scratch DSP, sample-accurate master clock redesign.
