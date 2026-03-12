@@ -92,6 +92,13 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
+            // Allow the asset protocol to serve files from ~/.autodj
+            let state = handle.state::<AppState>();
+            let base_dir = state.cache.base_dir().to_path_buf();
+            let scope = app.asset_protocol_scope();
+            scope.allow_directory(&base_dir, true)
+                .unwrap_or_else(|e| log::warn!("Failed to add asset scope: {e}"));
+
             // Spawn the backend conductor loop (owns AutoDJ state machine)
             conductor::spawn_conductor(handle.clone());
 

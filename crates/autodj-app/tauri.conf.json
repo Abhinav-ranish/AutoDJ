@@ -24,6 +24,7 @@
     "security": {
       "csp": null,
       "assetProtocol": {
+        "enable": true,
         "scope": ["$HOME/.autodj/**", "$HOME/.autodj/cache/**", "/tmp/**"]
       }
     }
