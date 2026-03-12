@@ -1124,7 +1124,7 @@ fn classify_llm_error(err: &AiError) -> &'static str {
             {
                 "provider_offline"
             } else if lower.contains("model") && lower.contains("not found") {
-                "provider_error"
+                "model_not_found"
             } else {
                 "provider_error"
             }

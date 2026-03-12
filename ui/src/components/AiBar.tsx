@@ -57,6 +57,7 @@ function fallbackReasonLabel(reason: string | null | undefined): { label: string
         missing_api_key: "No API key -> heuristic",
         disabled: "LLM disabled -> heuristic",
         provider_error: "LLM unavailable -> heuristic",
+        model_not_found: "Model not found -> heuristic",
         provider_offline: "Provider offline -> heuristic",
         timeout: "LLM timeout -> heuristic",
         parse_failure: "LLM parse failed -> heuristic",
