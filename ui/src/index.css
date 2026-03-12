@@ -3055,10 +3055,17 @@ body {
 
 .center-mixer-xfader {
   display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
   width: 100%;
   padding: var(--gap-xs) var(--gap-sm);
+}
+
+.xfader-slider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
 }
 
 .center-mixer-xfader .crossfader-slider {
@@ -4043,7 +4050,11 @@ body {
 
 /* Crossfader section gets more vertical breathing room */
 .center-mixer-xfader {
-  padding: var(--gap-sm) var(--gap-sm);
+  padding: var(--gap-sm);
+  overflow: visible;
+}
+
+.xfader-slider-row {
   overflow: visible;
 }
 

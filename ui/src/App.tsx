@@ -621,16 +621,18 @@ function DJView() {
                                 {crossfaderPercent > 0 ? `+${crossfaderPercent}` : crossfaderPercent}
                             </span>
                         </div>
-                        <span className="xfader-label xfader-a">A</span>
-                        <input
-                            type="range"
-                            className="crossfader-slider"
-                            min={-100}
-                            max={100}
-                            value={(engineState?.crossfader ?? 0) * 100}
-                            onChange={(e) => setCrossfader(Number(e.target.value) / 100)}
-                        />
-                        <span className="xfader-label xfader-b">B</span>
+                        <div className="xfader-slider-row">
+                            <span className="xfader-label xfader-a">A</span>
+                            <input
+                                type="range"
+                                className="crossfader-slider"
+                                min={-100}
+                                max={100}
+                                value={(engineState?.crossfader ?? 0) * 100}
+                                onChange={(e) => setCrossfader(Number(e.target.value) / 100)}
+                            />
+                            <span className="xfader-label xfader-b">B</span>
+                        </div>
                     </div>
 
                     <button
