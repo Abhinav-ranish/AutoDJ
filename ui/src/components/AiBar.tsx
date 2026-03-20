@@ -60,6 +60,7 @@ function fallbackReasonLabel(reason: string | null | undefined): { label: string
         model_not_found: "Model not found -> heuristic",
         provider_offline: "Provider offline -> heuristic",
         timeout: "LLM timeout -> heuristic",
+        rate_limited: "Rate limited -> heuristic",
         parse_failure: "LLM parse failed -> heuristic",
         schema_validation_failure: "LLM schema mismatch -> heuristic",
         unsafe_action_rejected: "Unsafe action rejected",

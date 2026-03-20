@@ -3,7 +3,63 @@
 use crate::{AiConfig, AiError};
 use reqwest::{Client, header};
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::collections::VecDeque;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// Sliding-window token usage tracker for rate limiting.
+struct TokenBucket {
+    entries: VecDeque<(Instant, u32)>,
+    limit_per_minute: u32,
+}
+
+impl TokenBucket {
+    fn new(limit: u32) -> Self {
+        Self {
+            entries: VecDeque::new(),
+            limit_per_minute: limit,
+        }
+    }
+
+    /// Prune entries older than 60 seconds and return tokens used in the window.
+    fn tokens_used(&mut self) -> u32 {
+        let cutoff = Instant::now() - Duration::from_secs(60);
+        while self.entries.front().map_or(false, |(t, _)| *t < cutoff) {
+            self.entries.pop_front();
+        }
+        self.entries.iter().map(|(_, n)| n).sum()
+    }
+
+    /// Check if there's capacity for `estimated_tokens`. Returns Ok or the ms to wait.
+    fn check_capacity(&mut self, estimated_tokens: u32) -> Result<(), u64> {
+        let used = self.tokens_used();
+        if used + estimated_tokens <= self.limit_per_minute {
+            Ok(())
+        } else {
+            // Estimate wait time: when will enough tokens expire?
+            let excess = (used + estimated_tokens).saturating_sub(self.limit_per_minute);
+            let mut freed = 0u32;
+            let now = Instant::now();
+            for (t, n) in &self.entries {
+                freed += n;
+                if freed >= excess {
+                    let age = now.duration_since(*t);
+                    let wait = Duration::from_secs(60).saturating_sub(age);
+                    return Err(wait.as_millis() as u64 + 100); // +100ms buffer
+                }
+            }
+            Err(60_000) // worst case: wait a full minute
+        }
+    }
+
+    fn record(&mut self, tokens: u32) {
+        self.entries.push_back((Instant::now(), tokens));
+    }
+}
+
+/// Global rate limiter, lazily initialized per provider config.
+static RATE_LIMITER: std::sync::LazyLock<Mutex<TokenBucket>> =
+    std::sync::LazyLock::new(|| Mutex::new(TokenBucket::new(0)));
 
 pub struct LlmClient {
     client: Client,
@@ -30,11 +86,41 @@ impl LlmClient {
         context_json: &str,
         config: &AiConfig,
     ) -> Result<String, AiError> {
-        match config.provider.as_str() {
+        // Pre-flight rate limit check for token-constrained providers
+        if let Some(tpm) = config.rate_limit_tpm {
+            let estimated_tokens = ((prompt.len() + context_json.len()) as f64 / 4.0).ceil() as u32;
+            let mut bucket = RATE_LIMITER.lock().unwrap_or_else(|e| e.into_inner());
+            bucket.limit_per_minute = tpm;
+            if let Err(wait_ms) = bucket.check_capacity(estimated_tokens) {
+                log::warn!(
+                    "[llm] Rate limiter: estimated {}tok would exceed {}tpm limit, wait {}ms",
+                    estimated_tokens,
+                    tpm,
+                    wait_ms
+                );
+                return Err(AiError::RateLimited { retry_after_ms: wait_ms });
+            }
+        }
+
+        let result = match config.provider.as_str() {
             "groq" => self.query_groq(prompt, context_json, config).await,
             "ollama" => self.query_ollama(prompt, context_json, config).await,
             _ => self.query_gemini(prompt, context_json, config).await,
+        };
+
+        // Record actual usage on success
+        if result.is_ok() {
+            if let Some(_tpm) = config.rate_limit_tpm {
+                // Estimate total tokens (prompt + context + response)
+                let response_len = result.as_ref().map(|r| r.len()).unwrap_or(0);
+                let total_tokens = ((prompt.len() + context_json.len() + response_len) as f64 / 4.0).ceil() as u32;
+                if let Ok(mut bucket) = RATE_LIMITER.lock() {
+                    bucket.record(total_tokens);
+                }
+            }
         }
+
+        result
     }
 
     /// Gemini generateContent API.
@@ -111,7 +197,7 @@ impl LlmClient {
             .ok_or_else(|| AiError::LlmError("API key not configured".to_string()))?;
 
         let model = if config.model.is_empty() {
-            "llama-3.3-70b-versatile"
+            "llama-3.1-8b-instant"
         } else {
             &config.model
         };
@@ -258,28 +344,65 @@ impl LlmClient {
             headers.insert(header::AUTHORIZATION, auth_value);
         }
 
-        let response = self
-            .client
-            .post(url)
-            .headers(headers)
-            .timeout(Duration::from_secs(config.timeout_seconds as u64))
-            .json(payload)
-            .send()
-            .await
-            .map_err(|e| AiError::LlmError(format!("Request failed: {e}")))?;
+        let backoff_ms: [u64; 2] = [2000, 5000];
+        let max_attempts = 3u32;
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response
-                .text()
+        for attempt in 0..max_attempts {
+            let response = self
+                .client
+                .post(url)
+                .headers(headers.clone())
+                .timeout(Duration::from_secs(config.timeout_seconds as u64))
+                .json(payload)
+                .send()
                 .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(AiError::LlmError(format!("HTTP {}: {}", status, text)));
+                .map_err(|e| AiError::LlmError(format!("Request failed: {e}")))?;
+
+            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                // Parse Retry-After header (seconds) if present
+                let retry_after_ms = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .map(|s| (s * 1000.0) as u64)
+                    .unwrap_or_else(|| {
+                        backoff_ms.get(attempt as usize).copied().unwrap_or(5000)
+                    });
+
+                let text = response.text().await.unwrap_or_default();
+                log::warn!(
+                    "[llm] Rate limited (429), attempt {}/{}: retry_after={}ms body={}",
+                    attempt + 1,
+                    max_attempts,
+                    retry_after_ms,
+                    &text[..text.len().min(200)]
+                );
+
+                if attempt + 1 < max_attempts {
+                    tokio::time::sleep(Duration::from_millis(retry_after_ms)).await;
+                    continue;
+                }
+
+                return Err(AiError::RateLimited { retry_after_ms });
+            }
+
+            if !response.status().is_success() {
+                let status = response.status();
+                let text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(AiError::LlmError(format!("HTTP {}: {}", status, text)));
+            }
+
+            return response
+                .json()
+                .await
+                .map_err(|e| AiError::ParseError(format!("Failed to parse response body: {e}")));
         }
 
-        response
-            .json()
-            .await
-            .map_err(|e| AiError::ParseError(format!("Failed to parse response body: {e}")))
+        // Should not reach here, but just in case
+        Err(AiError::LlmError("Max retry attempts exhausted".to_string()))
     }
 }

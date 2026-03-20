@@ -25,6 +25,9 @@ pub struct AiConfig {
     pub endpoint_url: Option<String>,
     pub timeout_seconds: u32,
     pub prompt_template: Option<String>,
+    /// Rate-limit cap for the provider (tokens per minute). `None` = unlimited.
+    #[serde(default)]
+    pub rate_limit_tpm: Option<u32>,
 
     // Heuristic Weights (8 dimensions, should sum to ~1.0)
     pub weight_tempo: f64,
@@ -76,6 +79,7 @@ impl Default for AiConfig {
             endpoint_url: None,
             timeout_seconds: 5,
             prompt_template: None,
+            rate_limit_tpm: None,
             weight_tempo: 0.20,
             weight_key: 0.20,
             weight_energy: 0.15,
@@ -99,6 +103,8 @@ pub enum AiError {
     ParseError(String),
     #[error("No candidates available")]
     NoCandidates,
+    #[error("Rate limited — retry after {retry_after_ms}ms")]
+    RateLimited { retry_after_ms: u64 },
     #[error("Heuristic fallback triggered due to: {0}")]
     Fallback(String),
 }

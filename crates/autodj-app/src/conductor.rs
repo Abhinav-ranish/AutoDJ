@@ -169,6 +169,7 @@ pub struct ConductorState {
     /// Playlist queue (ordered track IDs)
     pub queue: Vec<String>,
     pub queue_index: usize,
+    pub last_planning_instant: Option<std::time::Instant>,
 }
 
 impl Default for ConductorState {
@@ -187,6 +188,7 @@ impl Default for ConductorState {
             last_error: None,
             queue: Vec::new(),
             queue_index: 0,
+            last_planning_instant: None,
         }
     }
 }
@@ -669,7 +671,11 @@ async fn conductor_tick(
         });
     }
 
-    if !should_trigger || cond.transition_lock {
+    let cooldown_ok = cond.last_planning_instant
+        .map(|t| t.elapsed() > std::time::Duration::from_secs(15))
+        .unwrap_or(true);
+
+    if !should_trigger || cond.transition_lock || !cooldown_ok {
         return Ok(());
     }
 
@@ -708,6 +714,7 @@ async fn conductor_tick(
         let decision = request_next_track_internal(app_state, es).await;
 
         let mut cond = app_state.conductor.write().await;
+        cond.last_planning_instant = Some(std::time::Instant::now());
 
         match decision {
             Ok(d) => {

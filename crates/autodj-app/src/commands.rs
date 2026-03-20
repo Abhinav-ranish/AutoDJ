@@ -810,6 +810,11 @@ pub async fn classify_track(
         .await
         .map_err(|e| format!("Classification error: {e}"))?;
 
+    // Throttle classification requests for rate-limited providers
+    if ai_config.provider == "groq" {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    }
+
     // Save to DB
     let tags_json =
         serde_json::to_string(&classification.ai_tags).unwrap_or_else(|_| "[]".to_string());

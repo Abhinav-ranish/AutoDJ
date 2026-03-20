@@ -115,6 +115,116 @@ pub struct SetFlowContext {
     pub energy_trend: String,
 }
 
+// ── Compact types for token-constrained providers (e.g. Groq) ──────────────
+
+/// Compact track profile for token-constrained providers (Groq).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackProfileCompact {
+    pub id: String,
+    pub artist: String,
+    pub title: String,
+    pub bpm: f64,
+    pub perceived_tempo: f64,
+    pub key: String,
+    pub energy: f64,
+    pub genre: Option<String>,
+    pub mood: Option<String>,
+    pub vibe: Option<String>,
+    pub vocal_presence: Option<f64>,
+    pub intro_length_ms: Option<u64>,
+    pub outro_length_ms: Option<u64>,
+}
+
+/// Compact current state (drops transition_windows and auto_cues arrays).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurrentStateCompact {
+    pub playing_deck: String,
+    pub track_id: String,
+    pub artist: String,
+    pub title: String,
+    pub bpm: f64,
+    pub perceived_tempo: f64,
+    pub key: String,
+    pub energy: f64,
+    pub elapsed_ms: u64,
+    pub time_remaining_ms: u64,
+    pub duration_ms: u64,
+    pub genre: Option<String>,
+    pub mood: Option<String>,
+    pub vibe: Option<String>,
+    pub vocal_presence: Option<f64>,
+    pub vocal_risk_level: String,
+    pub best_transition_window_ms: Option<u64>,
+    pub best_transition_window_anchor: Option<String>,
+    pub section_momentum: String,
+}
+
+/// Token-efficient AI context for rate-limited providers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiContextCompact {
+    pub current_state: CurrentStateCompact,
+    pub preferences: PreferencesContext,
+    pub constraints: ConstraintsContext,
+    pub available_tracks: Vec<TrackProfileCompact>,
+    pub set_flow: Option<SetFlowContext>,
+}
+
+/// Build a compact context by stripping heavy fields for token-constrained providers.
+/// The `track_ids` parameter limits which available_tracks are included (pre-filtered by scorer).
+pub fn compact_context(full: &AiContext, track_ids: Option<&[String]>) -> AiContextCompact {
+    let current = &full.current_state;
+    let compact_current = CurrentStateCompact {
+        playing_deck: current.playing_deck.clone(),
+        track_id: current.track_id.clone(),
+        artist: current.artist.clone(),
+        title: current.title.clone(),
+        bpm: current.bpm,
+        perceived_tempo: current.perceived_tempo,
+        key: current.key.clone(),
+        energy: current.energy,
+        elapsed_ms: current.elapsed_ms,
+        time_remaining_ms: current.time_remaining_ms,
+        duration_ms: current.duration_ms,
+        genre: current.genre.clone(),
+        mood: current.mood.clone(),
+        vibe: current.vibe.clone(),
+        vocal_presence: current.vocal_presence,
+        vocal_risk_level: current.vocal_risk_level.clone(),
+        best_transition_window_ms: current.best_transition_window_ms,
+        best_transition_window_anchor: current.best_transition_window_anchor.clone(),
+        section_momentum: current.section_momentum.clone(),
+    };
+
+    let tracks: Vec<TrackProfileCompact> = full
+        .available_tracks
+        .iter()
+        .filter(|t| track_ids.map_or(true, |ids| ids.contains(&t.id)))
+        .map(|t| TrackProfileCompact {
+            id: t.id.clone(),
+            artist: t.artist.clone(),
+            title: t.title.clone(),
+            bpm: t.bpm,
+            perceived_tempo: t.perceived_tempo,
+            key: t.key.clone(),
+            energy: t.energy,
+            genre: t.genre.clone(),
+            mood: t.mood.clone(),
+            vibe: t.vibe.clone(),
+            vocal_presence: t.vocal_presence,
+            intro_length_ms: t.intro_length_ms,
+            outro_length_ms: t.outro_length_ms,
+        })
+        .collect();
+
+    AiContextCompact {
+        current_state: compact_current,
+        preferences: full.preferences.clone(),
+        constraints: full.constraints.clone(),
+        available_tracks: tracks,
+        set_flow: full.set_flow.clone(),
+    }
+}
+
 /// Classification data for a track (loaded from DB).
 #[derive(Debug, Clone, Default)]
 pub struct TrackClassificationData {

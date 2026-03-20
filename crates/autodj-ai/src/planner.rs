@@ -373,7 +373,69 @@ impl AiPlanner {
             self.config.provider,
             self.config.model
         );
-        match self.query_llm(context).await {
+
+        // Pre-filter context for token-constrained providers
+        let filtered_context;
+        let query_context =
+            if self.config.rate_limit_tpm.is_some() || self.config.provider == "groq" {
+                // Score all candidates and keep top 10 for the LLM
+                let current_class = classifications.get(&current_profile.track_id);
+                let current_candidate = ScoringCandidate {
+                    profile: current_profile,
+                    genre: current_class.and_then(|c| c.genre.as_deref()),
+                    mood: current_class.and_then(|c| c.mood.as_deref()),
+                    artist: None,
+                    vibe: current_class.and_then(|c| c.vibe.as_deref()),
+                    vocal: current_profile.vocal_presence,
+                };
+
+                let mut scored: Vec<(&TrackProfile, f64)> = available_profiles
+                    .iter()
+                    .filter(|p| p.track_id != current_profile.track_id)
+                    .map(|p| {
+                        let class = classifications.get(&p.track_id);
+                        let candidate = ScoringCandidate {
+                            profile: p,
+                            genre: class.and_then(|c| c.genre.as_deref()),
+                            mood: class.and_then(|c| c.mood.as_deref()),
+                            artist: None,
+                            vibe: class.and_then(|c| c.vibe.as_deref()),
+                            vocal: p.vocal_presence,
+                        };
+                        let score = self.scorer.score(
+                            &current_candidate,
+                            &candidate,
+                            &context.constraints.recent_tracks,
+                            &context.preferences.intent,
+                        );
+                        (p, score)
+                    })
+                    .collect();
+
+                scored.sort_by(|a, b| {
+                    b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                let top_ids: Vec<String> = scored
+                    .iter()
+                    .take(10)
+                    .map(|(p, _)| p.track_id.clone())
+                    .collect();
+
+                log::info!(
+                    "[planner] Pre-filtered to {} candidates for token-constrained provider",
+                    top_ids.len()
+                );
+
+                // Build a filtered context with only top candidates
+                let mut ctx = context.clone();
+                ctx.available_tracks.retain(|t| top_ids.contains(&t.id));
+                filtered_context = ctx;
+                &filtered_context
+            } else {
+                context
+            };
+
+        match self.query_llm(query_context).await {
             Ok(mut decision) => {
                 // Validate track selection
                 if let Some(ref track_id) = decision.track_selection {
@@ -427,8 +489,19 @@ impl AiPlanner {
             .as_deref()
             .unwrap_or(DJ_SYSTEM_PROMPT);
 
-        let context_json = serde_json::to_string(context)
-            .map_err(|e| AiError::ParseError(format!("Failed to serialize context: {e}")))?;
+        // Use compact context for token-constrained providers
+        let context_json =
+            if self.config.rate_limit_tpm.is_some() || self.config.provider == "groq" {
+                serde_json::to_string(&crate::context::compact_context(context, None))
+                    .map_err(|e| {
+                        AiError::ParseError(format!("Failed to serialize context: {e}"))
+                    })?
+            } else {
+                serde_json::to_string(context)
+                    .map_err(|e| {
+                        AiError::ParseError(format!("Failed to serialize context: {e}"))
+                    })?
+            };
 
         let response_text = self
             .llm
@@ -1137,6 +1210,7 @@ fn classify_llm_error(err: &AiError) -> &'static str {
                 "schema_validation_failure"
             }
         }
+        AiError::RateLimited { .. } => "rate_limited",
         AiError::NoCandidates => "insufficient_confidence",
         AiError::Fallback(msg) => {
             if msg.contains("unsafe") {

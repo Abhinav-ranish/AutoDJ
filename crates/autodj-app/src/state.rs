@@ -136,7 +136,7 @@ fn ai_config_from_env() -> AiConfig {
             std::env::var("GROQ_API_KEY")
                 .ok()
                 .filter(|k| !k.is_empty() && !k.starts_with("gsk_...")),
-            "llama-3.3-70b-versatile".to_string(),
+            "llama-3.1-8b-instant".to_string(),
             Some("https://api.groq.com/openai/v1".to_string()),
             None, // enabled derived from api_key presence
         ),
@@ -162,12 +162,19 @@ fn ai_config_from_env() -> AiConfig {
         ),
     };
 
-    AiConfig {
+    let mut config = AiConfig {
         enabled: enabled.unwrap_or(api_key.is_some()),
-        provider,
+        provider: provider.clone(),
         model,
         api_key,
         endpoint_url: endpoint,
         ..AiConfig::default()
+    };
+
+    // Set default rate limit for Groq (tokens per minute)
+    if provider == "groq" {
+        config.rate_limit_tpm = Some(13_000);
     }
+
+    config
 }
