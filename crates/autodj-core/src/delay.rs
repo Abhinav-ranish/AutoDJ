@@ -107,6 +107,7 @@ impl StereoDelay {
 
         // Apply ping-pong panning
         let (tap_l, tap_r) = if self.ping_pong {
+            #[allow(clippy::manual_is_multiple_of)]
             let pan = if (self.write_head / delay_frames.max(1)) % 2 == 0 {
                 (1.0_f32, 0.3_f32) // pan left
             } else {
