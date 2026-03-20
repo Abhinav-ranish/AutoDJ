@@ -308,46 +308,62 @@ impl TransitionTemplate for EchoDrop {
 
         let silence_beats = params["silence_beats"].as_u64().unwrap_or(4) as u32;
 
-        // SIMULATED echo drop: uses exponential gain ramp + silence gap.
-        // No actual delay/echo DSP — the "echo tail" is a volume fade approximation.
         let mut commands = Vec::new();
 
+        // Activate real delay DSP on outgoing deck at next bar
         commands.push(ScheduledCommand {
-            command: Command::SetDeckGain {
+            command: Command::SetDelay {
                 deck: outgoing_deck,
-                gain_db: -12.0,
+                subdivision: 0.5,
+                feedback: 0.6,
+                wet: 0.8,
+                ping_pong: false,
             },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
             target_sample: None,
         });
 
-        // "Echo" tail simulation over 2 beats
-        for beat in 1..=2 {
-            let gain = -12.0 - (beat as f32 * 20.0);
-            commands.push(ScheduledCommand {
-                command: Command::SetDeckGain {
-                    deck: outgoing_deck,
-                    gain_db: gain,
-                },
-                source: CommandSource::System,
-                schedule: SchedulePoint::AfterBeats(beat),
-                target_sample: None,
-            });
-        }
-
-        // Pause outgoing after the "echo"
+        // Fade outgoing gain over 2 beats
         commands.push(ScheduledCommand {
-            command: Command::Pause {
+            command: Command::SetDeckGain {
                 deck: outgoing_deck,
+                gain_db: -6.0,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(1),
+            target_sample: None,
+        });
+        commands.push(ScheduledCommand {
+            command: Command::SetDeckGain {
+                deck: outgoing_deck,
+                gain_db: -96.0,
             },
             source: CommandSource::System,
             schedule: SchedulePoint::AfterBeats(2),
             target_sample: None,
         });
 
+        // Pause outgoing + clear delay at beat 3
+        commands.push(ScheduledCommand {
+            command: Command::Pause {
+                deck: outgoing_deck,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(3),
+            target_sample: None,
+        });
+        commands.push(ScheduledCommand {
+            command: Command::ClearDelay {
+                deck: outgoing_deck,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(3),
+            target_sample: None,
+        });
+
         // Drop incoming after silence gap
-        let drop_beat = silence_beats;
+        let drop_beat = 3 + silence_beats;
         let final_cf = if incoming_deck == DeckId::B {
             1.0
         } else {
@@ -377,13 +393,15 @@ impl TransitionTemplate for EchoDrop {
             schedule: SchedulePoint::AfterBeats(drop_beat),
             target_sample: None,
         });
+
+        // Reset outgoing gain one beat later
         commands.push(ScheduledCommand {
             command: Command::SetDeckGain {
                 deck: outgoing_deck,
                 gain_db: 0.0,
             },
             source: CommandSource::System,
-            schedule: SchedulePoint::AfterBeats(drop_beat),
+            schedule: SchedulePoint::AfterBeats(drop_beat + 1),
             target_sample: None,
         });
 
@@ -1286,7 +1304,21 @@ impl TransitionTemplate for FxEchoSlam {
             target_sample: None,
         });
 
-        // Simulated echo tail on outgoing deck using exponential gain decay.
+        // Activate real delay DSP on outgoing deck at next bar
+        commands.push(ScheduledCommand {
+            command: Command::SetDelay {
+                deck: outgoing_deck,
+                subdivision: 0.75,
+                feedback: 0.55,
+                wet: 0.9,
+                ping_pong: false,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::NextBar,
+            target_sample: None,
+        });
+
+        // Gain fade on outgoing deck (still makes sense while delay echoes)
         commands.push(ScheduledCommand {
             command: Command::SetDeckGain {
                 deck: outgoing_deck,
@@ -1310,9 +1342,17 @@ impl TransitionTemplate for FxEchoSlam {
             });
         }
 
-        // Kill outgoing after the simulated echo tail.
+        // Kill outgoing after the echo tail + clear delay
         commands.push(ScheduledCommand {
             command: Command::Pause {
+                deck: outgoing_deck,
+            },
+            source: CommandSource::System,
+            schedule: SchedulePoint::AfterBeats(echo_beats),
+            target_sample: None,
+        });
+        commands.push(ScheduledCommand {
+            command: Command::ClearDelay {
                 deck: outgoing_deck,
             },
             source: CommandSource::System,
@@ -1412,10 +1452,41 @@ mod tests {
         let has_filter = commands
             .iter()
             .any(|cmd| matches!(cmd.command, Command::SetFilter { .. }));
+        let has_set_delay = commands
+            .iter()
+            .any(|cmd| matches!(cmd.command, Command::SetDelay { .. }));
+        let has_clear_delay = commands
+            .iter()
+            .any(|cmd| matches!(cmd.command, Command::ClearDelay { .. }));
         assert!(has_pause, "fx_echo_slam should pause outgoing deck");
         assert!(
             has_filter,
             "fx_echo_slam should include filter slam/reset commands"
         );
+        assert!(has_set_delay, "fx_echo_slam should activate delay DSP");
+        assert!(has_clear_delay, "fx_echo_slam should clear delay DSP on pause");
+    }
+
+    #[test]
+    fn echo_drop_emits_delay_commands() {
+        let params = serde_json::json!({
+            "incoming_deck": "B",
+            "silence_beats": 4
+        });
+        let commands = TransitionExpander::expand("echo_drop", &params)
+            .expect("echo_drop should expand");
+
+        let has_set_delay = commands
+            .iter()
+            .any(|cmd| matches!(cmd.command, Command::SetDelay { .. }));
+        let has_clear_delay = commands
+            .iter()
+            .any(|cmd| matches!(cmd.command, Command::ClearDelay { .. }));
+        let has_pause = commands
+            .iter()
+            .any(|cmd| matches!(cmd.command, Command::Pause { .. }));
+        assert!(has_set_delay, "echo_drop should activate delay DSP");
+        assert!(has_clear_delay, "echo_drop should clear delay DSP");
+        assert!(has_pause, "echo_drop should pause outgoing deck");
     }
 }

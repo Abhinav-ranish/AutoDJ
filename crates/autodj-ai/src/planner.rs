@@ -47,14 +47,14 @@ ramps rather than true DSP processing.
 
 - smooth_beatmix: 16 bars, bass swap, best for same-genre/tempo/vocal-safe conditions
 - filter_sweep: 8 bars, HP sweep, good for energy builds and genre changes
-- echo_drop [simulated]: 4-6 bars, gain-fade → silence → hard cut (no real delay DSP)
+- echo_drop: 4-6 bars, tempo-synced delay tail → silence → hard cut (real delay DSP)
 - drop_swap: buildup HP sweep → hard cut at drop, great for drop-to-drop moments
 - loop_roll: 4→2→1 bar stutter → cut, high impact, energy peaks
 - bass_kill_swap: blend mids first → bass swap, clean power transition, same genre
 - break_blend: HP opening + gentle fade, best for vocal-heavy or declining sections
 - backspin_cut [simulated]: rapid gain drop + filter → silence → cut (use spinback command for real reverse)
 - drop_ride: dual-drop ride with quick bass swap, high energy same-genre
-- fx_echo_slam [simulated]: gain-fade → silence → filter slam in (EchoOut/FilterSlam processed at app layer)
+- fx_echo_slam: delay tail + gain fade → filter slam in (real delay + filter DSP)
 
 ## Available Engine Actions
 These actions are REAL engine DSP and transport commands:

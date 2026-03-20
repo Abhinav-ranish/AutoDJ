@@ -933,7 +933,7 @@ async fn conductor_tick(
 
 /// Returns true when a transition template is an approximation rather than true DSP FX.
 fn is_simulated_template(template: &str) -> bool {
-    matches!(template, "echo_drop" | "backspin_cut" | "fx_echo_slam")
+    matches!(template, "backspin_cut")
 }
 
 /// Record runtime outcomes back into planner memory so anti-repetition logic has real data.
@@ -1361,9 +1361,9 @@ mod tests {
 
     #[test]
     fn simulated_template_detection_is_honest() {
-        assert!(is_simulated_template("echo_drop"));
         assert!(is_simulated_template("backspin_cut"));
-        assert!(is_simulated_template("fx_echo_slam"));
+        assert!(!is_simulated_template("echo_drop"));
+        assert!(!is_simulated_template("fx_echo_slam"));
         assert!(!is_simulated_template("smooth_beatmix"));
         assert!(!is_simulated_template("filter_sweep"));
     }
