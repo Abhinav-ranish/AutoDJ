@@ -26,6 +26,37 @@ export function ControlStrip({
     const { play, pause, setLoop, clearLoop, beatRepeat, beatRepeatOff, setSlipMode, vinylBrake, spinback, seek } = useStore();
     const loopActive = snapshot?.loop_active ?? false;
     const [activeLoopBars, setActiveLoopBars] = useState<number | null>(null);
+    const [echoActive, setEchoActive] = useState(false);
+    const [echoSubdivision, setEchoSubdivision] = useState(0.5);
+
+    const toggleEcho = async () => {
+        if (echoActive) {
+            await invoke('clear_delay', { deck: deckId });
+            setEchoActive(false);
+        } else {
+            await invoke('set_delay', {
+                deck: deckId,
+                subdivision: echoSubdivision,
+                feedback: 0.6,
+                wet: 0.8,
+                pingPong: false,
+            });
+            setEchoActive(true);
+        }
+    };
+
+    const changeEchoSubdivision = async (sub: number) => {
+        setEchoSubdivision(sub);
+        if (echoActive) {
+            await invoke('set_delay', {
+                deck: deckId,
+                subdivision: sub,
+                feedback: 0.6,
+                wet: 0.8,
+                pingPong: false,
+            });
+        }
+    };
 
     useEffect(() => {
         if (!snapshot?.loop_active) {
@@ -169,8 +200,41 @@ export function ControlStrip({
                 </div>
             </div>
 
+            {/* ── Echo Delay Row ── */}
+            <div className="control-row">
+                <div className="control-group">
+                    <span className="control-group-label">ECHO</span>
+                    <div className="control-group-btns">
+                        <button
+                            className={`ctrl-btn ctrl-btn-sm perf-btn ${echoActive ? "active" : ""}`}
+                            onClick={toggleEcho}
+                            disabled={isEmpty}
+                            title={echoActive ? "Echo Off" : "Echo On"}
+                        >
+                            {echoActive ? "ON" : "OFF"}
+                        </button>
+                        {([
+                            { label: "1/4", value: 0.25 },
+                            { label: "1/2", value: 0.5 },
+                            { label: "3/4", value: 0.75 },
+                            { label: "1", value: 1.0 },
+                        ] as const).map((opt) => (
+                            <button
+                                key={opt.value}
+                                className={`ctrl-btn ctrl-btn-sm fx-btn ${echoSubdivision === opt.value ? "loop-active" : ""}`}
+                                onClick={() => changeEchoSubdivision(opt.value)}
+                                disabled={isEmpty}
+                                title={`${opt.label} beat delay`}
+                            >
+                                {opt.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
             <div className="control-truth-note">
-                Real primitives: beat repeat, vinyl brake, spinback, slip.
+                Real primitives: beat repeat, vinyl brake, spinback, slip, echo delay.
             </div>
         </div>
     );

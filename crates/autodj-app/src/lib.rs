@@ -83,6 +83,8 @@ pub fn run() {
             commands::set_slip_mode,
             commands::vinyl_brake,
             commands::spinback,
+            commands::set_delay,
+            commands::clear_delay,
             commands::jump_to_marker,
             commands::test_ai_provider,
             commands::get_ai_debug_info,

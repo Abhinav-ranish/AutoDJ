@@ -1076,6 +1076,41 @@ pub fn spinback(deck: String, duration_ms: u32, state: State<'_, AppState>) -> R
     Ok(())
 }
 
+/// Set delay effect on a deck.
+#[tauri::command]
+pub fn set_delay(
+    deck: String,
+    subdivision: f32,
+    feedback: f32,
+    wet: f32,
+    ping_pong: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::SetDelay {
+            deck: deck_id,
+            subdivision,
+            feedback,
+            wet,
+            ping_pong,
+        },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Clear delay effect on a deck.
+#[tauri::command]
+pub fn clear_delay(deck: String, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::ClearDelay { deck: deck_id },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
 /// Jump to a named marker position.
 #[tauri::command]
 pub fn jump_to_marker(
