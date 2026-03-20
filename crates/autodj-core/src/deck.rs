@@ -2,6 +2,7 @@
 
 use crate::buffer::TrackBuffer;
 use crate::command::{EqBand, EqMode};
+use crate::delay::StereoDelay;
 use crate::eq::ThreeBandEq;
 use crate::filter::SvfFilter;
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,12 @@ pub struct Deck {
 
     /// HP/LP sweep filter.
     pub filter: SvfFilter,
+
+    /// Tempo-synced stereo delay.
+    pub delay: StereoDelay,
+
+    /// Current BPM (updated from transport clock each frame).
+    pub bpm: f64,
 
     /// Loop start position in frames (None = no loop).
     pub loop_start: Option<usize>,
@@ -81,6 +88,8 @@ impl Deck {
             speed: 1.0,
             eq: ThreeBandEq::new(sample_rate),
             filter: SvfFilter::new(sample_rate),
+            delay: StereoDelay::new(sample_rate),
+            bpm: 120.0,
             loop_start: None,
             loop_end: None,
             slip_mode: false,
@@ -112,6 +121,7 @@ impl Deck {
         self.brake_remaining = 0;
         self.spinback_remaining = 0;
         self.slip_position = 0.0;
+        self.delay.clear();
         self.track_id = Some(track_id);
         self.track = Some(track);
     }
@@ -158,7 +168,7 @@ impl Deck {
 
     /// Read the next stereo frame and advance position.
     ///
-    /// Signal chain: PCM → EQ → Filter → Gain → Output
+    /// Signal chain: PCM → EQ → Filter → Delay → Gain → Output
     ///
     /// Returns (0.0, 0.0) if no track is loaded or playback is paused.
     /// This method is safe for the audio callback: no allocation, no I/O.
@@ -238,9 +248,10 @@ impl Deck {
             self.slip_position += self.speed.abs(); // always forward
         }
  
-        // Signal chain: EQ → Filter → Gain
+        // Signal chain: EQ → Filter → Delay → Gain
         let (l, r) = self.eq.process(l, r);
         let (l, r) = self.filter.process(l, r);
+        let (l, r) = self.delay.process(l, r, self.bpm);
         (l * self.gain, r * self.gain)
     }
 
@@ -332,6 +343,16 @@ impl Deck {
         self.spinback_initial_speed = self.speed;
         self.spinback_total = duration_frames;
         self.spinback_remaining = duration_frames;
+    }
+
+    /// Set delay parameters and activate.
+    pub fn set_delay(&mut self, subdivision: f32, feedback: f32, wet: f32, ping_pong: bool) {
+        self.delay.set_params(subdivision, feedback, wet, ping_pong);
+    }
+
+    /// Clear delay effect.
+    pub fn clear_delay(&mut self) {
+        self.delay.clear();
     }
 
     /// Enable/disable slip mode.

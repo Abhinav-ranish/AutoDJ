@@ -29,8 +29,6 @@ pub struct StereoDelay {
     /// Whether the delay is active.
     pub active: bool,
 
-    /// Internal tap counter for ping-pong panning.
-    tap_counter: u32,
     /// Cached delay in frames (updated when BPM changes).
     cached_delay_frames: usize,
     cached_bpm: f64,
@@ -51,7 +49,6 @@ impl StereoDelay {
             wet: 0.0,
             ping_pong: false,
             active: false,
-            tap_counter: 0,
             cached_delay_frames: 0,
             cached_bpm: 0.0,
         }
@@ -74,7 +71,6 @@ impl StereoDelay {
         self.active = false;
         self.wet = 0.0;
         self.feedback = 0.0;
-        self.tap_counter = 0;
     }
 
     /// Process one stereo frame. BPM is passed per-frame for tempo tracking.

@@ -122,6 +122,10 @@ pub enum Command {
     VinylBrake { deck: DeckId, duration_ms: u32 },
     /// Spinback effect: reverse playback with deceleration over `duration_ms`.
     Spinback { deck: DeckId, duration_ms: u32 },
+    /// Tempo-synced delay effect.
+    SetDelay { deck: DeckId, subdivision: f32, feedback: f32, wet: f32, ping_pong: bool },
+    /// Clear delay effect.
+    ClearDelay { deck: DeckId },
     /// Jump to a named marker position (intro, drop, break, outro, first_beat).
     JumpToMarker { deck: DeckId, marker: String, position_ms: u64 },
 }
@@ -209,6 +213,16 @@ impl CommandValidator {
                     duration_ms: duration_ms.clamp(100, 5000),
                 })
             }
+            Command::SetDelay { deck, subdivision, feedback, wet, ping_pong } => {
+                Some(Command::SetDelay {
+                    deck,
+                    subdivision: subdivision.clamp(0.0625, 4.0),
+                    feedback: feedback.clamp(0.0, 0.85),
+                    wet: wet.clamp(0.0, 1.0),
+                    ping_pong,
+                })
+            }
+            Command::ClearDelay { deck } => Some(Command::ClearDelay { deck }),
             other @ (Command::SetEqKill { .. } | Command::SetEqMode { .. } | Command::SeekMs { .. }
                     | Command::BeatRepeatOff { .. } | Command::SetSlipMode { .. }
                     | Command::JumpToMarker { .. }) => {

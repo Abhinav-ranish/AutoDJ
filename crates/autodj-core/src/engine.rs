@@ -380,6 +380,9 @@ impl AudioEngine {
                             }
                         }
 
+                        deck_a.bpm = transport.bpm;
+                        deck_b.bpm = transport.bpm;
+
                         let a = deck_a.next_frame();
                         let b = deck_b.next_frame();
                         let (l, r) = mixer.mix(a, b);
@@ -594,6 +597,12 @@ impl AudioEngine {
             Command::Spinback { deck, duration_ms } => {
                 let frames = transport.ms_to_frames(*duration_ms as u64) as u32;
                 Self::get_deck_mut(*deck, deck_a, deck_b).start_spinback(frames);
+            }
+            Command::SetDelay { deck, subdivision, feedback, wet, ping_pong } => {
+                Self::get_deck_mut(*deck, deck_a, deck_b).set_delay(*subdivision, *feedback, *wet, *ping_pong);
+            }
+            Command::ClearDelay { deck } => {
+                Self::get_deck_mut(*deck, deck_a, deck_b).clear_delay();
             }
             Command::JumpToMarker { deck, position_ms, .. } => {
                 let frame = transport.ms_to_frames(*position_ms);
