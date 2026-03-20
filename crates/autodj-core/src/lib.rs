@@ -7,6 +7,7 @@
 pub mod buffer;
 pub mod command;
 pub mod deck;
+pub mod delay;
 pub mod engine;
 pub mod eq;
 pub mod filter;
