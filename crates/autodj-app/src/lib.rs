@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod conductor;
+pub mod spotify;
 pub mod state;
 
 use state::AppState;

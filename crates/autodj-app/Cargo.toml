@@ -22,6 +22,13 @@ dirs = "5.0"
 lofty = "0.21"
 cpal = "0.15"
 dotenvy = "0.15.7"
+reqwest = { workspace = true }
+tiny_http = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+open = "5"
+urlencoding = "2.1"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
