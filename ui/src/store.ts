@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export interface TrackRecord {
     id: string;
@@ -234,6 +235,13 @@ interface DJStore {
         prompt_template: string | null;
     } | null;
 
+    // Spotify
+    spotifyStatus: { connected: boolean; user_name: string } | null;
+    spotifyPlaylists: Array<{ id: string; name: string; image_url: string | null; track_count: number; owner: string }>;
+    spotifyPlaylistTracks: Array<{ id: string; name: string; artist: string; album: string; duration_ms: number; spotify_url: string; artist_id: string }>;
+    spotifyImporting: boolean;
+    spotifyImportProgress: { current: number; total: number; track: string; status: string } | null;
+
     // Actions
     initStore: () => Promise<void>;
     fetchTracks: () => Promise<void>;
@@ -327,6 +335,14 @@ interface DJStore {
     getSessions: () => Promise<SessionRecord[]>;
     exportCueSheet: (sessionId: string) => Promise<string>;
 
+    // Spotify Actions
+    fetchSpotifyStatus: () => Promise<void>;
+    spotifyConnect: (clientId: string) => Promise<void>;
+    spotifyDisconnect: () => Promise<void>;
+    fetchSpotifyPlaylists: () => Promise<void>;
+    fetchSpotifyPlaylistTracks: (playlistId: string) => Promise<void>;
+    importSpotifyPlaylist: (playlistId: string) => Promise<void>;
+
     setErrorToast: (msg: string | null) => void;
     setEngineState: (state: EngineState) => void;
     setConductorState: (state: ConductorSnapshot) => void;
@@ -349,6 +365,11 @@ export const useStore = create<DJStore>((set, get) => ({
     autodjMessage: "",
     autodjTransitioning: false,
     aiConfig: null,
+    spotifyStatus: null,
+    spotifyPlaylists: [],
+    spotifyPlaylistTracks: [],
+    spotifyImporting: false,
+    spotifyImportProgress: null,
     isRecording: false,
     recordingStartTime: null,
     audioDevices: [],
@@ -402,6 +423,10 @@ export const useStore = create<DJStore>((set, get) => ({
         } catch (e) {
             console.error("Failed to restore AI config", e);
         }
+        get().fetchSpotifyStatus();
+        listen<any>("spotify-import-progress", (event) => {
+            set({ spotifyImportProgress: event.payload });
+        });
     },
 
     fetchTracks: async () => {
@@ -1013,5 +1038,63 @@ export const useStore = create<DJStore>((set, get) => ({
     // Phase 35: DJ Personality
     setDjPersonality: (personality: string) => {
         set({ djPersonality: personality });
+    },
+
+    // Spotify
+    fetchSpotifyStatus: async () => {
+        try {
+            const status = await invoke<{ connected: boolean; user_name: string }>("spotify_status");
+            set({ spotifyStatus: status });
+        } catch {
+            set({ spotifyStatus: { connected: false, user_name: "" } });
+        }
+    },
+
+    spotifyConnect: async (clientId: string) => {
+        try {
+            await invoke("spotify_connect", { clientId });
+            await get().fetchSpotifyStatus();
+        } catch (e: any) {
+            get().setErrorToast(`Spotify connect failed: ${e}`);
+        }
+    },
+
+    spotifyDisconnect: async () => {
+        try {
+            await invoke("spotify_disconnect");
+            set({ spotifyStatus: { connected: false, user_name: "" }, spotifyPlaylists: [], spotifyPlaylistTracks: [] });
+        } catch (e: any) {
+            get().setErrorToast(`Spotify disconnect failed: ${e}`);
+        }
+    },
+
+    fetchSpotifyPlaylists: async () => {
+        try {
+            const playlists = await invoke<any[]>("spotify_get_playlists");
+            set({ spotifyPlaylists: playlists });
+        } catch (e: any) {
+            get().setErrorToast(`Failed to load playlists: ${e}`);
+        }
+    },
+
+    fetchSpotifyPlaylistTracks: async (playlistId: string) => {
+        try {
+            const tracks = await invoke<any[]>("spotify_get_playlist_tracks", { playlistId });
+            set({ spotifyPlaylistTracks: tracks });
+        } catch (e: any) {
+            get().setErrorToast(`Failed to load playlist tracks: ${e}`);
+        }
+    },
+
+    importSpotifyPlaylist: async (playlistId: string) => {
+        set({ spotifyImporting: true, spotifyImportProgress: null });
+        try {
+            await invoke("spotify_import_playlist", { playlistId });
+            await get().fetchTracks();
+        } catch (e: any) {
+            get().setErrorToast(`Spotify import failed: ${e}`);
+        } finally {
+            set({ spotifyImporting: false });
+        }
     },
 }));

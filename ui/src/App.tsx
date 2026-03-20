@@ -10,14 +10,16 @@ import { DeckPanel } from "./components/DeckPanel";
 import { MixerControls } from "./components/MixerChannel";
 import { AiBar, TransitionsPanel } from "./components/AiBar";
 import { IconSettings, IconRecord } from "./components/Icons";
+import { SpotifyPanel } from "./components/SpotifyPanel";
 
 // ─── Library View ────────────────────────────────────────────────
 
 function LibraryView() {
-    const { tracks, importing, fetchTracks, importFiles, loadTrack, clearLibrary, analyzingTracks, libraryFilters, setLibraryFilters, clearLibraryFilters, analyzeTrack, classifyTrack, classifyAll, batchClassifying, batchClassifyProgress, aiConfig, playlists, fetchPlaylists, addTrackToPlaylist } = useStore();
+    const { tracks, importing, fetchTracks, importFiles, loadTrack, clearLibrary, analyzingTracks, libraryFilters, setLibraryFilters, clearLibraryFilters, analyzeTrack, classifyTrack, classifyAll, batchClassifying, batchClassifyProgress, aiConfig, playlists, fetchPlaylists, addTrackToPlaylist, spotifyStatus } = useStore();
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; trackId: string } | null>(null);
     const [playlistSubmenu, setPlaylistSubmenu] = useState(false);
+    const [showSpotify, setShowSpotify] = useState(false);
 
     useEffect(() => {
         fetchTracks();
@@ -132,6 +134,23 @@ function LibraryView() {
                             {batchClassifying
                                 ? `Classifying ${batchClassifyProgress.done}/${batchClassifyProgress.total}`
                                 : "Classify All"}
+                        </button>
+                    )}
+                    {spotifyStatus?.connected && (
+                        <button
+                            onClick={() => setShowSpotify(s => !s)}
+                            style={{
+                                padding: "8px 16px",
+                                backgroundColor: showSpotify ? "#1DB954" : "rgba(29, 185, 84, 0.3)",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                fontSize: "13px",
+                                fontWeight: 600,
+                            }}
+                        >
+                            Spotify
                         </button>
                     )}
                 </div>
@@ -332,6 +351,8 @@ function LibraryView() {
                     </button>
                 </div>
             )}
+
+            {showSpotify && <SpotifyPanel />}
         </div>
     );
 }
@@ -773,7 +794,7 @@ function AutoDjPanel() {
 // ─── Settings Panel ─────────────────────────────────────────────
 
 function SettingsPanel() {
-    const { aiConfig, setAiConfig, audioDevices, getAudioDevices, savePreference, loadPreference } = useStore();
+    const { aiConfig, setAiConfig, audioDevices, getAudioDevices, savePreference, loadPreference, spotifyStatus, spotifyConnect, spotifyDisconnect, fetchSpotifyStatus } = useStore();
     const [apiKey, setApiKey] = useState("");
     const [provider, setProvider] = useState<"gemini" | "groq" | "ollama">(
         aiConfig?.provider === "groq" ? "groq" : aiConfig?.provider === "ollama" ? "ollama" : "gemini"
@@ -783,7 +804,8 @@ function SettingsPanel() {
     const [isSaving, setIsSaving] = useState(false);
     const [defaultTemplate, setDefaultTemplate] = useState("smooth_beatmix");
     const [defaultDuration, setDefaultDuration] = useState(16);
-    const [settingsTab, setSettingsTab] = useState<"ai" | "audio" | "autodj">("ai");
+    const [settingsTab, setSettingsTab] = useState<"ai" | "audio" | "autodj" | "spotify">("ai");
+    const [spotifyClientId, setSpotifyClientId] = useState("");
 
     // Sync provider from config when it changes externally
     useEffect(() => {
@@ -805,6 +827,8 @@ function SettingsPanel() {
         getAudioDevices();
         loadPreference("default_template").then(v => { if (v) setDefaultTemplate(v); });
         loadPreference("default_duration").then(v => { if (v) setDefaultDuration(Number(v)); });
+        loadPreference("spotify_client_id").then(v => { if (v) setSpotifyClientId(v); });
+        fetchSpotifyStatus();
     }, []);
 
     const handleSaveAi = async () => {
@@ -885,6 +909,7 @@ function SettingsPanel() {
                 <button style={tabStyle("ai")} onClick={() => setSettingsTab("ai")}>AI</button>
                 <button style={tabStyle("audio")} onClick={() => setSettingsTab("audio")}>Audio</button>
                 <button style={tabStyle("autodj")} onClick={() => setSettingsTab("autodj")}>AutoDJ</button>
+                <button style={tabStyle("spotify")} onClick={() => setSettingsTab("spotify")}>Spotify</button>
             </div>
 
             {settingsTab === "ai" && (
@@ -1056,6 +1081,61 @@ function SettingsPanel() {
                     >
                         Save Defaults
                     </button>
+                </div>
+            )}
+
+            {settingsTab === "spotify" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {spotifyStatus?.connected ? (
+                        <>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "rgba(0,0,0,0.2)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border)" }}>
+                                <span style={{ fontFamily: "monospace", color: "var(--status-ready)", flex: 1, fontSize: "14px" }}>
+                                    Connected as {spotifyStatus.user_name}
+                                </span>
+                                <button
+                                    onClick={async () => { await spotifyDisconnect(); }}
+                                    style={{ background: "transparent", border: "1px solid var(--border)", color: "var(--text-secondary)", borderRadius: "4px", cursor: "pointer", padding: "4px 8px", fontSize: "10px", fontWeight: "bold" }}
+                                >
+                                    DISCONNECT
+                                </button>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                                <label style={labelStyle}>Spotify Client ID</label>
+                                <input
+                                    type="text"
+                                    placeholder="Enter your Spotify Client ID"
+                                    value={spotifyClientId}
+                                    onChange={(e) => setSpotifyClientId(e.target.value)}
+                                    style={inputStyle}
+                                />
+                            </div>
+                            <div style={{ fontSize: "11px", color: "var(--text-muted)", padding: "6px 8px", background: "rgba(0,0,0,0.15)", borderRadius: "4px", lineHeight: 1.5 }}>
+                                Create an app at <span style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}>developer.spotify.com</span> to get a Client ID.
+                            </div>
+                            <button
+                                onClick={async () => {
+                                    if (!spotifyClientId.trim()) return;
+                                    await savePreference("spotify_client_id", spotifyClientId.trim());
+                                    await spotifyConnect(spotifyClientId.trim());
+                                }}
+                                disabled={!spotifyClientId.trim()}
+                                style={{
+                                    padding: "10px",
+                                    background: spotifyClientId.trim() ? "linear-gradient(135deg, #1DB954, #1aa34a)" : "var(--bg-elevated)",
+                                    color: spotifyClientId.trim() ? "white" : "var(--text-muted)",
+                                    border: "none",
+                                    borderRadius: "6px",
+                                    fontWeight: "bold",
+                                    cursor: spotifyClientId.trim() ? "pointer" : "not-allowed",
+                                }}
+                            >
+                                Connect Spotify
+                            </button>
+                        </>
+                    )}
                 </div>
             )}
         </div>
