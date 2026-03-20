@@ -902,17 +902,48 @@ async fn conductor_tick(
         }
     }
 
-    let deck_str = if idle_deck == DeckId::A { "A" } else { "B" };
-    app_state.send_command(
-        Command::ExecuteTransition {
-            template: template_name.clone(),
-            params: serde_json::json!({
-                "incoming_deck": deck_str,
-                "duration_bars": duration_bars,
-            }),
-        },
-        CommandSource::System,
-    );
+    // Check if AI provided a direct action timeline
+    let has_ai_actions = decision_for_memory
+        .as_ref()
+        .and_then(|d| d.actions.as_ref())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+
+    if has_ai_actions {
+        let actions = decision_for_memory
+            .as_ref()
+            .and_then(|d| d.actions.clone())
+            .unwrap_or_default();
+
+        let max_actions = 64;
+        let mut sorted_actions = actions;
+        sorted_actions.sort_by_key(|a| a.at_ms);
+
+        let mut last_ms = 0u64;
+        for action in sorted_actions.iter().take(max_actions) {
+            if action.at_ms > last_ms {
+                let wait = std::time::Duration::from_millis(action.at_ms - last_ms);
+                tokio::time::sleep(wait).await;
+                last_ms = action.at_ms;
+            }
+            if let Some(command) = mix_action_to_command(&action.kind, playing_deck, idle_deck) {
+                app_state.send_command(command, CommandSource::AI);
+            }
+        }
+        log::info!("[conductor] Dispatched {} AI actions directly", sorted_actions.len().min(max_actions));
+    } else {
+        let deck_str = if idle_deck == DeckId::A { "A" } else { "B" };
+        app_state.send_command(
+            Command::ExecuteTransition {
+                template: template_name.clone(),
+                params: serde_json::json!({
+                    "incoming_deck": deck_str,
+                    "duration_bars": duration_bars,
+                }),
+            },
+            CommandSource::System,
+        );
+    }
     record_runtime_memory(
         app_state,
         Some(&next_track_id),
@@ -929,6 +960,65 @@ async fn conductor_tick(
     );
 
     Ok(())
+}
+
+/// Convert an AI MixActionKind into an engine Command.
+fn mix_action_to_command(
+    kind: &MixActionKind,
+    playing_deck: DeckId,
+    idle_deck: DeckId,
+) -> Option<Command> {
+    let resolve_deck = |s: &str| -> DeckId {
+        match s.to_uppercase().as_str() {
+            "A" => DeckId::A,
+            "B" => DeckId::B,
+            "INCOMING" | "IDLE" => idle_deck,
+            _ => playing_deck,
+        }
+    };
+
+    match kind {
+        MixActionKind::SetGain { deck, gain_db } => Some(Command::SetDeckGain { deck: resolve_deck(deck), gain_db: *gain_db }),
+        MixActionKind::SetFilter { deck, cutoff_hz, resonance } => Some(Command::SetFilter { deck: resolve_deck(deck), cutoff_hz: *cutoff_hz, resonance: *resonance }),
+        MixActionKind::SetEqBand { deck, band, gain_db } => {
+            let eq_band = match band.to_lowercase().as_str() {
+                "low" | "lo" => autodj_core::command::EqBand::Low,
+                "mid" => autodj_core::command::EqBand::Mid,
+                _ => autodj_core::command::EqBand::High,
+            };
+            Some(Command::SetEq { deck: resolve_deck(deck), band: eq_band, gain_db: *gain_db })
+        }
+        MixActionKind::SetEqKill { deck, band, enabled } => {
+            let eq_band = match band.to_lowercase().as_str() {
+                "low" | "lo" => autodj_core::command::EqBand::Low,
+                "mid" => autodj_core::command::EqBand::Mid,
+                _ => autodj_core::command::EqBand::High,
+            };
+            Some(Command::SetEqKill { deck: resolve_deck(deck), band: eq_band, enabled: *enabled })
+        }
+        MixActionKind::SetCrossfader { position } => Some(Command::SetCrossfader { position: *position }),
+        MixActionKind::Play { deck } => Some(Command::Play { deck: resolve_deck(deck) }),
+        MixActionKind::Pause { deck } => Some(Command::Pause { deck: resolve_deck(deck) }),
+        MixActionKind::BeatRepeat { deck, beats } => Some(Command::BeatRepeat { deck: resolve_deck(deck), beats: *beats }),
+        MixActionKind::BeatRepeatOff { deck } => Some(Command::BeatRepeatOff { deck: resolve_deck(deck) }),
+        MixActionKind::VinylBrake { deck, duration_ms } => Some(Command::VinylBrake { deck: resolve_deck(deck), duration_ms: *duration_ms }),
+        MixActionKind::Spinback { deck, duration_ms } => Some(Command::Spinback { deck: resolve_deck(deck), duration_ms: *duration_ms }),
+        MixActionKind::SetSlipMode { deck, enabled } => Some(Command::SetSlipMode { deck: resolve_deck(deck), enabled: *enabled }),
+        MixActionKind::EchoOut { deck, beats, feedback } => Some(Command::SetDelay { deck: resolve_deck(deck), subdivision: *beats, feedback: *feedback, wet: 0.8, ping_pong: false }),
+        MixActionKind::FilterSlam { deck, direction } => {
+            let cutoff = if direction == "up" { 20000.0 } else { 200.0 };
+            Some(Command::SetFilter { deck: resolve_deck(deck), cutoff_hz: cutoff, resonance: 2.0 })
+        }
+        MixActionKind::SetLoop { deck, length_bars } => Some(Command::SetLoop { deck: resolve_deck(deck), start_beat: 0, length_bars: *length_bars }),
+        MixActionKind::ClearLoop { deck } => Some(Command::ClearLoop { deck: resolve_deck(deck) }),
+        MixActionKind::ExecuteTemplate { template_name, params } => Some(Command::ExecuteTransition { template: template_name.clone(), params: params.clone() }),
+        MixActionKind::SetTempo { deck, bpm } => Some(Command::SetTempo { deck: resolve_deck(deck), bpm: *bpm }),
+        MixActionKind::LoadTrack { deck, track_id } => Some(Command::LoadTrack { deck: resolve_deck(deck), track_id: track_id.clone() }),
+        MixActionKind::JumpToMarker { deck, marker, position_ms } => Some(Command::JumpToMarker { deck: resolve_deck(deck), marker: marker.clone(), position_ms: *position_ms }),
+        MixActionKind::ReverbTail { .. } | MixActionKind::Scratch { .. } => None,
+        MixActionKind::SetDelay { deck, subdivision, feedback, wet, ping_pong } => Some(Command::SetDelay { deck: resolve_deck(deck), subdivision: *subdivision, feedback: *feedback, wet: *wet, ping_pong: *ping_pong }),
+        MixActionKind::ClearDelay { deck } => Some(Command::ClearDelay { deck: resolve_deck(deck) }),
+    }
 }
 
 /// Returns true when a transition template is an approximation rather than true DSP FX.
@@ -963,6 +1053,8 @@ async fn record_runtime_memory(
                 MixActionKind::BeatRepeat { .. } => push_unique(&mut fx_markers, "beat_repeat"),
                 MixActionKind::Spinback { .. } => push_unique(&mut fx_markers, "spinback"),
                 MixActionKind::VinylBrake { .. } => push_unique(&mut fx_markers, "vinyl_brake"),
+                MixActionKind::SetDelay { .. } => push_unique(&mut fx_markers, "delay"),
+                MixActionKind::ClearDelay { .. } => {} // no need to track clear
                 _ => {}
             }
         }

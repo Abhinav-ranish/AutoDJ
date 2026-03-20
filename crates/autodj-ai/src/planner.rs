@@ -69,10 +69,12 @@ These actions are REAL engine DSP and transport commands:
   - set_slip_mode { deck, enabled } — REAL engine support
   - vinyl_brake { deck, duration_ms (100-5000) } — REAL engine support
   - spinback { deck, duration_ms (100-5000) } — REAL engine support
+  - set_delay { deck, subdivision, feedback, wet, ping_pong } — tempo-synced delay (subdivision in beats: 0.25=1/16, 0.5=1/8, 1.0=1/4)
+  - clear_delay { deck } — stop delay effect
   - execute_template { template_name, params }
 
 These actions are app-layer approximations (NOT real DSP):
-  - echo_out — gain ramp approximation, no delay line
+  - echo_out — triggers real delay DSP (set_delay under the hood)
   - reverb_tail — not implemented in audio engine
   - filter_slam — rapid filter sweep, not a dedicated DSP effect
   - scratch — not implemented in audio engine
@@ -237,6 +239,18 @@ pub enum MixActionKind {
     Scratch {
         deck: String,
         intensity: f32,
+    },
+    /// Tempo-synced delay effect (real DSP).
+    SetDelay {
+        deck: String,
+        subdivision: f32,
+        feedback: f32,
+        wet: f32,
+        ping_pong: bool,
+    },
+    /// Clear delay effect.
+    ClearDelay {
+        deck: String,
     },
 }
 
