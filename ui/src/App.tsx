@@ -113,7 +113,7 @@ function LibraryView() {
                     >
                         Clear
                     </button>
-                    {aiConfig?.api_key && (
+                    {aiConfig?.enabled && (
                         <button
                             onClick={classifyAll}
                             disabled={batchClassifying || tracks.length === 0}

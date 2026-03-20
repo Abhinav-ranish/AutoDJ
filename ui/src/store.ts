@@ -631,9 +631,9 @@ export const useStore = create<DJStore>((set, get) => ({
             await invoke("analyze_track", { trackId });
             // Re-fetch tracks to update status immediately
             await get().fetchTracks();
-            // Auto-classify if API key is configured
+            // Auto-classify if AI is enabled (works for Ollama without API key too)
             const config = get().aiConfig;
-            if (config?.api_key && !get().classifyingTracks.has(trackId)) {
+            if (config?.enabled && !get().classifyingTracks.has(trackId)) {
                 get().classifyTrack(trackId).catch(console.error);
             }
         } catch (e: any) {
