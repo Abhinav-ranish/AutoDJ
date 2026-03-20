@@ -1284,6 +1284,307 @@ fn parse_deck(s: &str) -> Result<DeckId, String> {
     }
 }
 
+// ─── Spotify Integration ──────────────────────────────────────
+
+/// Connect to Spotify via OAuth PKCE flow.
+#[tauri::command]
+pub async fn spotify_connect(
+    client_id: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let client = crate::spotify::SpotifyClient::new(&client_id);
+    let tokens = client.connect().await?;
+
+    // Persist tokens in DB preferences
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.set_preference("spotify_access_token", &tokens.access_token)
+        .map_err(|e| format!("DB: {e}"))?;
+    db.set_preference("spotify_refresh_token", &tokens.refresh_token)
+        .map_err(|e| format!("DB: {e}"))?;
+    db.set_preference("spotify_token_expiry", &tokens.expires_at.to_string())
+        .map_err(|e| format!("DB: {e}"))?;
+    db.set_preference("spotify_user_name", &tokens.user_name)
+        .map_err(|e| format!("DB: {e}"))?;
+    db.set_preference("spotify_user_id", &tokens.user_id)
+        .map_err(|e| format!("DB: {e}"))?;
+    db.set_preference("spotify_client_id", &client_id)
+        .map_err(|e| format!("DB: {e}"))?;
+
+    Ok(serde_json::json!({
+        "connected": true,
+        "user_name": tokens.user_name,
+        "user_id": tokens.user_id,
+    }))
+}
+
+/// Disconnect from Spotify by clearing all stored tokens.
+#[tauri::command]
+pub fn spotify_disconnect(state: State<'_, AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    for key in &[
+        "spotify_access_token",
+        "spotify_refresh_token",
+        "spotify_token_expiry",
+        "spotify_user_name",
+        "spotify_user_id",
+        "spotify_client_id",
+    ] {
+        db.set_preference(key, "").map_err(|e| format!("DB: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Get current Spotify connection status.
+#[tauri::command]
+pub fn spotify_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    let user_name = db
+        .get_preference("spotify_user_name")
+        .map_err(|e| format!("DB: {e}"))?
+        .unwrap_or_default();
+    let refresh_token = db
+        .get_preference("spotify_refresh_token")
+        .map_err(|e| format!("DB: {e}"))?
+        .unwrap_or_default();
+    Ok(serde_json::json!({
+        "connected": !refresh_token.is_empty(),
+        "user_name": user_name,
+    }))
+}
+
+/// Helper: get a valid Spotify access token, refreshing if expired.
+async fn get_valid_spotify_token(
+    state: &State<'_, AppState>,
+) -> Result<String, String> {
+    let (access_token, refresh_token, expiry_str, client_id) = {
+        let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+        let at = db
+            .get_preference("spotify_access_token")
+            .map_err(|e| format!("DB: {e}"))?
+            .unwrap_or_default();
+        let rt = db
+            .get_preference("spotify_refresh_token")
+            .map_err(|e| format!("DB: {e}"))?
+            .unwrap_or_default();
+        let exp = db
+            .get_preference("spotify_token_expiry")
+            .map_err(|e| format!("DB: {e}"))?
+            .unwrap_or_default();
+        let cid = db
+            .get_preference("spotify_client_id")
+            .map_err(|e| format!("DB: {e}"))?
+            .unwrap_or_default();
+        (at, rt, exp, cid)
+    };
+
+    if refresh_token.is_empty() {
+        return Err("Not connected to Spotify".to_string());
+    }
+
+    let expires_at: u64 = expiry_str.parse().unwrap_or(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // If token is still valid, return it
+    if now < expires_at.saturating_sub(60) && !access_token.is_empty() {
+        return Ok(access_token);
+    }
+
+    // Refresh the token
+    let client = crate::spotify::SpotifyClient::new(&client_id);
+    let tokens = client.refresh_token(&refresh_token).await?;
+
+    // Persist new tokens
+    let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+    db.set_preference("spotify_access_token", &tokens.access_token)
+        .map_err(|e| format!("DB: {e}"))?;
+    db.set_preference("spotify_refresh_token", &tokens.refresh_token)
+        .map_err(|e| format!("DB: {e}"))?;
+    db.set_preference("spotify_token_expiry", &tokens.expires_at.to_string())
+        .map_err(|e| format!("DB: {e}"))?;
+    db.set_preference("spotify_user_name", &tokens.user_name)
+        .map_err(|e| format!("DB: {e}"))?;
+    db.set_preference("spotify_user_id", &tokens.user_id)
+        .map_err(|e| format!("DB: {e}"))?;
+
+    Ok(tokens.access_token)
+}
+
+/// Get Spotify playlists for the connected user.
+#[tauri::command]
+pub async fn spotify_get_playlists(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::spotify::SpotifyPlaylist>, String> {
+    let token = get_valid_spotify_token(&state).await?;
+    let client_id = {
+        let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+        db.get_preference("spotify_client_id")
+            .map_err(|e| format!("DB: {e}"))?
+            .unwrap_or_default()
+    };
+    let client = crate::spotify::SpotifyClient::new(&client_id);
+    client.get_playlists(&token).await
+}
+
+/// Get tracks in a Spotify playlist.
+#[tauri::command]
+pub async fn spotify_get_playlist_tracks(
+    playlist_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::spotify::SpotifyTrack>, String> {
+    let token = get_valid_spotify_token(&state).await?;
+    let client_id = {
+        let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+        db.get_preference("spotify_client_id")
+            .map_err(|e| format!("DB: {e}"))?
+            .unwrap_or_default()
+    };
+    let client = crate::spotify::SpotifyClient::new(&client_id);
+    client.get_playlist_tracks(&token, &playlist_id).await
+}
+
+/// Import a Spotify playlist: download tracks via spotDL, import, and enrich.
+#[tauri::command]
+pub async fn spotify_import_playlist(
+    playlist_id: String,
+    app_handle: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    use tauri::Emitter;
+
+    let token = get_valid_spotify_token(&state).await?;
+    let client_id = {
+        let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+        db.get_preference("spotify_client_id")
+            .map_err(|e| format!("DB: {e}"))?
+            .unwrap_or_default()
+    };
+    let client = crate::spotify::SpotifyClient::new(&client_id);
+    let tracks = client.get_playlist_tracks(&token, &playlist_id).await?;
+
+    let total = tracks.len();
+    let mut imported = 0u32;
+    let mut skipped = 0u32;
+    let mut failed = 0u32;
+
+    let download_dir = state.data_dir.join("downloads");
+
+    for (i, track) in tracks.iter().enumerate() {
+        let track_label = format!("{} - {}", track.artist, track.name);
+
+        // Emit progress
+        let _ = app_handle.emit(
+            "spotify-import-progress",
+            serde_json::json!({
+                "current": i + 1,
+                "total": total,
+                "track": track_label,
+                "status": "downloading",
+            }),
+        );
+
+        // Check if track already exists in library (artist + title match)
+        {
+            let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+            let all_tracks = db.get_all_tracks().map_err(|e| format!("DB: {e}"))?;
+            let already_exists = all_tracks.iter().any(|t| {
+                t.artist.as_deref() == Some(&track.artist)
+                    && t.title.as_deref() == Some(&track.name)
+            });
+            if already_exists {
+                log::info!("Track already in library, skipping: {}", track_label);
+                skipped += 1;
+                continue;
+            }
+        }
+
+        // Download via spotDL
+        let downloaded_path =
+            match crate::spotify::download_track(&track.spotify_url, &download_dir).await {
+                Ok(p) => p,
+                Err(e) => {
+                    log::error!("Failed to download {}: {e}", track_label);
+                    failed += 1;
+                    let _ = app_handle.emit(
+                        "spotify-import-progress",
+                        serde_json::json!({
+                            "current": i + 1,
+                            "total": total,
+                            "track": track_label,
+                            "status": "failed",
+                        }),
+                    );
+                    continue;
+                }
+            };
+
+        // Import into library
+        let path_str = downloaded_path.to_string_lossy().to_string();
+        let import_result = import_files(vec![path_str], state.clone()).await;
+        let track_ids = match import_result {
+            Ok(ids) => ids,
+            Err(e) => {
+                log::error!("Failed to import {}: {e}", track_label);
+                failed += 1;
+                continue;
+            }
+        };
+
+        // Enrich with Spotify metadata
+        if let Some(track_id) = track_ids.first() {
+            // Fetch artist genres for enrichment
+            let genres = client
+                .get_artist_genres(&token, &track.artist_id)
+                .await
+                .unwrap_or_default();
+
+            // Use default feature values for classification mapping
+            let enrichment =
+                crate::spotify::map_spotify_to_classification(&genres, 0.5, 0.5, 0.5);
+
+            let tags_json = serde_json::to_string(&enrichment.ai_tags)
+                .unwrap_or_else(|_| "[]".to_string());
+
+            let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+            let _ = db.save_classification(
+                track_id,
+                &enrichment.genre,
+                &enrichment.subgenre,
+                &enrichment.mood,
+                &enrichment.vibe,
+                &enrichment.mix_notes,
+                &tags_json,
+            );
+        }
+
+        imported += 1;
+        let _ = app_handle.emit(
+            "spotify-import-progress",
+            serde_json::json!({
+                "current": i + 1,
+                "total": total,
+                "track": track_label,
+                "status": "imported",
+            }),
+        );
+    }
+
+    Ok(serde_json::json!({
+        "total": total,
+        "imported": imported,
+        "skipped": skipped,
+        "failed": failed,
+    }))
+}
+
+/// Check if spotDL is installed and return its version.
+#[tauri::command]
+pub fn spotify_check_spotdl() -> Result<String, String> {
+    crate::spotify::check_spotdl()
+}
+
 // ─── Preferences ──────────────────────────────────────────────
 
 /// Get a preference value.

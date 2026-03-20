@@ -91,6 +91,13 @@ pub fn run() {
             commands::get_ai_debug_info,
             commands::get_conductor_state,
             commands::set_conductor_queue,
+            commands::spotify_connect,
+            commands::spotify_disconnect,
+            commands::spotify_status,
+            commands::spotify_get_playlists,
+            commands::spotify_get_playlist_tracks,
+            commands::spotify_import_playlist,
+            commands::spotify_check_spotdl,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
