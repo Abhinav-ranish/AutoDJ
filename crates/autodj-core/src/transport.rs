@@ -114,6 +114,11 @@ impl TransportClock {
     pub fn frames_to_ms(&self, frames: usize) -> u64 {
         (frames as f64 * 1000.0 / self.sample_rate) as u64
     }
+
+    /// Get the number of frames per beat at the current BPM.
+    pub fn beat_frames(&self) -> f64 {
+        self.samples_per_beat
+    }
 }
 
 #[cfg(test)]

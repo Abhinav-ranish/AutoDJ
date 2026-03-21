@@ -11,7 +11,7 @@ use crate::state::{AppState, DjMode};
 use autodj_ai::context::{build_context, ContextInput, TrackClassificationData};
 use autodj_ai::planner::{AiDecision, MixActionKind};
 use autodj_core::buffer::TrackBuffer;
-use autodj_core::command::{Command, CommandSource, DeckId};
+use autodj_core::command::{Command, CommandSource, DeckId, SchedulePoint};
 use autodj_core::engine::EngineStateSnapshot;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -851,13 +851,26 @@ async fn conductor_tick(
             .last_decision
             .as_ref()
             .and_then(|d| d.transition_plan.as_ref());
+        // Phase 51: When no AI plan is available, pick a varied fallback template
+        // instead of always defaulting to smooth_beatmix.
         let template = plan
             .map(|p| p.template_name.clone())
-            .unwrap_or_else(|| "smooth_beatmix".to_string());
+            .unwrap_or_else(|| {
+                let fallback_templates = [
+                    "bass_kill_swap",
+                    "filter_sweep",
+                    "smooth_beatmix",
+                    "echo_drop",
+                    "break_blend",
+                ];
+                let idx = (es.sample_pos as usize) % fallback_templates.len();
+                fallback_templates[idx].to_string()
+            });
         let overrides = plan.and_then(|p| p.parameter_overrides.as_ref());
+        // Phase 52: default 8 bars (was 16). Templates also have shorter internal defaults.
         let dur_bars = overrides
             .and_then(|o| o.get("duration_bars").and_then(|v| v.as_u64()))
-            .unwrap_or(16) as u32;
+            .unwrap_or(8) as u32;
 
         let bpm = es.master_bpm.max(60.0);
         let t_ms = (dur_bars as f64 / bpm) * 60.0 * 4.0 * 1000.0;
@@ -918,19 +931,32 @@ async fn conductor_tick(
         let max_actions = 64;
         let mut sorted_actions = actions;
         sorted_actions.sort_by_key(|a| a.at_ms);
+        sorted_actions.truncate(max_actions);
 
-        let mut last_ms = 0u64;
-        for action in sorted_actions.iter().take(max_actions) {
-            if action.at_ms > last_ms {
-                let wait = std::time::Duration::from_millis(action.at_ms - last_ms);
-                tokio::time::sleep(wait).await;
-                last_ms = action.at_ms;
-            }
+        // Phase 51: Convert AI action timelines into beat-scheduled engine commands
+        // instead of blocking the conductor thread with tokio::sleep.
+        // Convert at_ms offsets into AfterBeats scheduling.
+        let bpm = es.master_bpm.max(60.0) as f64;
+        let beat_ms = 60_000.0 / bpm;
+        let mut dispatched = 0;
+        for action in &sorted_actions {
             if let Some(command) = mix_action_to_command(&action.kind, playing_deck, idle_deck) {
-                app_state.send_command(command, CommandSource::AI);
+                let beats_offset = (action.at_ms as f64 / beat_ms).round() as u32;
+                let schedule = if beats_offset == 0 {
+                    SchedulePoint::NextBar
+                } else {
+                    SchedulePoint::AfterBeats(beats_offset)
+                };
+                app_state.engine_sender
+                    .lock()
+                    .map(|mut sender| {
+                        sender.send_scheduled(command, CommandSource::AI, schedule);
+                    })
+                    .ok();
+                dispatched += 1;
             }
         }
-        log::info!("[conductor] Dispatched {} AI actions directly", sorted_actions.len().min(max_actions));
+        log::info!("[conductor] Scheduled {} AI actions as beat-aligned commands", dispatched);
     } else {
         let deck_str = if idle_deck == DeckId::A { "A" } else { "B" };
         app_state.send_command(
@@ -1015,7 +1041,17 @@ fn mix_action_to_command(
         MixActionKind::SetTempo { deck, bpm } => Some(Command::SetTempo { deck: resolve_deck(deck), bpm: *bpm }),
         MixActionKind::LoadTrack { deck, track_id } => Some(Command::LoadTrack { deck: resolve_deck(deck), track_id: track_id.clone() }),
         MixActionKind::JumpToMarker { deck, marker, position_ms } => Some(Command::JumpToMarker { deck: resolve_deck(deck), marker: marker.clone(), position_ms: *position_ms }),
-        MixActionKind::ReverbTail { .. } | MixActionKind::Scratch { .. } => None,
+        MixActionKind::ReverbTail { deck, decay_seconds } => {
+            // Map decay_seconds to room_size: longer decay = bigger room
+            let room = (*decay_seconds / 3.0).clamp(0.3, 0.95);
+            Some(Command::SetReverb {
+                deck: resolve_deck(deck),
+                room_size: room,
+                damping: 0.4,
+                wet: 0.5,
+            })
+        }
+        MixActionKind::Scratch { .. } => None,
         MixActionKind::SetDelay { deck, subdivision, feedback, wet, ping_pong } => Some(Command::SetDelay { deck: resolve_deck(deck), subdivision: *subdivision, feedback: *feedback, wet: *wet, ping_pong: *ping_pong }),
         MixActionKind::ClearDelay { deck } => Some(Command::ClearDelay { deck: resolve_deck(deck) }),
     }

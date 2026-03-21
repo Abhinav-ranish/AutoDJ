@@ -5,6 +5,7 @@ use crate::command::{EqBand, EqMode};
 use crate::delay::StereoDelay;
 use crate::eq::ThreeBandEq;
 use crate::filter::SvfFilter;
+use crate::reverb::StereoReverb;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -44,6 +45,9 @@ pub struct Deck {
 
     /// Tempo-synced stereo delay.
     pub delay: StereoDelay,
+
+    /// Algorithmic reverb.
+    pub reverb: StereoReverb,
 
     /// Current BPM (updated from transport clock each frame).
     pub bpm: f64,
@@ -89,6 +93,7 @@ impl Deck {
             eq: ThreeBandEq::new(sample_rate),
             filter: SvfFilter::new(sample_rate),
             delay: StereoDelay::new(sample_rate),
+            reverb: StereoReverb::new(sample_rate),
             bpm: 120.0,
             loop_start: None,
             loop_end: None,
@@ -122,6 +127,7 @@ impl Deck {
         self.spinback_remaining = 0;
         self.slip_position = 0.0;
         self.delay.clear();
+        self.reverb.clear();
         self.track_id = Some(track_id);
         self.track = Some(track);
     }
@@ -248,10 +254,11 @@ impl Deck {
             self.slip_position += self.speed.abs(); // always forward
         }
  
-        // Signal chain: EQ → Filter → Delay → Gain
+        // Signal chain: EQ → Filter → Delay → Reverb → Gain
         let (l, r) = self.eq.process(l, r);
         let (l, r) = self.filter.process(l, r);
         let (l, r) = self.delay.process(l, r, self.bpm);
+        let (l, r) = self.reverb.process(l, r);
         (l * self.gain, r * self.gain)
     }
 
@@ -353,6 +360,16 @@ impl Deck {
     /// Clear delay effect.
     pub fn clear_delay(&mut self) {
         self.delay.clear();
+    }
+
+    /// Set reverb parameters.
+    pub fn set_reverb(&mut self, room_size: f32, damping: f32, wet: f32) {
+        self.reverb.set_params(room_size, damping, wet);
+    }
+
+    /// Clear reverb effect.
+    pub fn clear_reverb(&mut self) {
+        self.reverb.clear();
     }
 
     /// Enable/disable slip mode.

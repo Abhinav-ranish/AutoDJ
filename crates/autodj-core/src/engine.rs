@@ -608,6 +608,22 @@ impl AudioEngine {
                 let frame = transport.ms_to_frames(*position_ms);
                 Self::get_deck_mut(*deck, deck_a, deck_b).seek(frame);
             }
+            Command::SetReverb { deck, room_size, damping, wet } => {
+                Self::get_deck_mut(*deck, deck_a, deck_b).reverb.set_params(*room_size, *damping, *wet);
+            }
+            Command::ClearReverb { deck } => {
+                Self::get_deck_mut(*deck, deck_a, deck_b).reverb.clear();
+            }
+            Command::BeatJump { deck, beats } => {
+                let d = Self::get_deck_mut(*deck, deck_a, deck_b);
+                let beat_frames = transport.beat_frames();
+                let jump_frames = (*beats as f64) * beat_frames;
+                let new_pos = (d.position + jump_frames).max(0.0);
+                if let Some(track) = &d.track {
+                    let max = track.total_frames().saturating_sub(1) as f64;
+                    d.position = new_pos.min(max);
+                }
+            }
             _ => {
                 log::debug!("Command not yet implemented: {:?}", command);
             }

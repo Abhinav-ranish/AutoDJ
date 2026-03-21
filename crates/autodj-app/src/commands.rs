@@ -1131,6 +1131,52 @@ pub fn jump_to_marker(
     Ok(())
 }
 
+// ─── Phase 51: Reverb + Beat Jump ─────────────────────
+
+/// Set reverb effect on a deck.
+#[tauri::command]
+pub fn set_reverb(
+    deck: String,
+    room_size: f32,
+    damping: f32,
+    wet: f32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::SetReverb {
+            deck: deck_id,
+            room_size,
+            damping,
+            wet,
+        },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Clear reverb effect on a deck.
+#[tauri::command]
+pub fn clear_reverb(deck: String, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::ClearReverb { deck: deck_id },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
+/// Beat jump: seek forward or backward by beats.
+#[tauri::command]
+pub fn beat_jump(deck: String, beats: i32, state: State<'_, AppState>) -> Result<(), String> {
+    let deck_id = parse_deck(&deck)?;
+    state.send_command(
+        Command::BeatJump { deck: deck_id, beats },
+        CommandSource::User,
+    );
+    Ok(())
+}
+
 // ─── Phase 33: AI Provider Health Check ─────────────────────
 
 /// Test the currently configured AI provider by sending a minimal request.
@@ -1445,10 +1491,11 @@ pub async fn spotify_get_playlist_tracks(
     client.get_playlist_tracks(&token, &playlist_id).await
 }
 
-/// Import a Spotify playlist: download tracks via spotDL, import, and enrich.
+/// Import a Spotify playlist: download tracks via spotDL, import, enrich, and create a local playlist.
 #[tauri::command]
 pub async fn spotify_import_playlist(
     playlist_id: String,
+    playlist_name: String,
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
@@ -1468,6 +1515,7 @@ pub async fn spotify_import_playlist(
     let mut imported = 0u32;
     let mut skipped = 0u32;
     let mut failed = 0u32;
+    let mut playlist_track_ids: Vec<String> = Vec::new();
 
     let download_dir = state.data_dir.join("downloads");
 
@@ -1489,12 +1537,13 @@ pub async fn spotify_import_playlist(
         {
             let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
             let all_tracks = db.get_all_tracks().map_err(|e| format!("DB: {e}"))?;
-            let already_exists = all_tracks.iter().any(|t| {
+            let existing = all_tracks.iter().find(|t| {
                 t.artist.as_deref() == Some(&track.artist)
                     && t.title.as_deref() == Some(&track.name)
             });
-            if already_exists {
-                log::info!("Track already in library, skipping: {}", track_label);
+            if let Some(existing_track) = existing {
+                log::info!("Track already in library, skipping download: {}", track_label);
+                playlist_track_ids.push(existing_track.id.clone());
                 skipped += 1;
                 continue;
             }
@@ -1532,17 +1581,29 @@ pub async fn spotify_import_playlist(
             }
         };
 
-        // Enrich with Spotify metadata
+        // Enrich with Spotify metadata + real audio features
         if let Some(track_id) = track_ids.first() {
-            // Fetch artist genres for enrichment
+            playlist_track_ids.push(track_id.clone());
+
+            // Fetch artist genres
             let genres = client
                 .get_artist_genres(&token, &track.artist_id)
                 .await
                 .unwrap_or_default();
 
-            // Use default feature values for classification mapping
+            // Fetch real audio features from Spotify API
+            let (danceability, energy, valence) = client
+                .get_audio_features(&token, &track.id)
+                .await
+                .unwrap_or((0.5, 0.5, 0.5));
+
+            log::info!(
+                "Spotify features for {}: dance={:.2} energy={:.2} valence={:.2}",
+                track.name, danceability, energy, valence
+            );
+
             let enrichment =
-                crate::spotify::map_spotify_to_classification(&genres, 0.5, 0.5, 0.5);
+                crate::spotify::map_spotify_to_classification(&genres, valence, energy, danceability);
 
             let tags_json = serde_json::to_string(&enrichment.ai_tags)
                 .unwrap_or_else(|_| "[]".to_string());
@@ -1571,11 +1632,29 @@ pub async fn spotify_import_playlist(
         );
     }
 
+    // Create a local playlist with all imported/existing tracks
+    let mut created_playlist_id: Option<String> = None;
+    if !playlist_track_ids.is_empty() {
+        let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
+        match db.create_playlist(&playlist_name, Some("Imported from Spotify")) {
+            Ok(pl_id) => {
+                for tid in &playlist_track_ids {
+                    let _ = db.add_track_to_playlist(&pl_id, tid);
+                }
+                created_playlist_id = Some(pl_id);
+            }
+            Err(e) => {
+                log::error!("Failed to create playlist '{}': {e}", playlist_name);
+            }
+        }
+    }
+
     Ok(serde_json::json!({
         "total": total,
         "imported": imported,
         "skipped": skipped,
         "failed": failed,
+        "playlist_id": created_playlist_id,
     }))
 }
 

@@ -151,6 +151,7 @@ impl Database {
     /// Open or create the database at the given path.
     pub fn open(path: &Path) -> Result<Self, DbError> {
         let conn = Connection::open(path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let db = Self { conn };
         db.init_schema()?;
         Ok(db)
@@ -159,6 +160,7 @@ impl Database {
     /// Open an in-memory database (for testing).
     pub fn open_memory() -> Result<Self, DbError> {
         let conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         let db = Self { conn };
         db.init_schema()?;
         Ok(db)
@@ -782,6 +784,8 @@ impl Database {
     pub fn clear_all_tracks(&self) -> Result<(), DbError> {
         self.conn.execute_batch(
             "
+            DELETE FROM playlist_tracks;
+            DELETE FROM playlists;
             DELETE FROM auto_cues;
             DELETE FROM transition_feedback;
             DELETE FROM hot_cues;

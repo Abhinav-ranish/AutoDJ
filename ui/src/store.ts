@@ -426,6 +426,10 @@ export const useStore = create<DJStore>((set, get) => ({
         get().fetchSpotifyStatus();
         listen<any>("spotify-import-progress", (event) => {
             set({ spotifyImportProgress: event.payload });
+            // Auto-refresh library as each track gets imported
+            if (event.payload?.status === "imported") {
+                get().fetchTracks();
+            }
         });
     },
 
@@ -716,7 +720,7 @@ export const useStore = create<DJStore>((set, get) => ({
     clearLibrary: async () => {
         try {
             await invoke("clear_library");
-            set({ tracks: [] });
+            set({ tracks: [], playlists: [], playlistTracks: [], selectedPlaylistId: null });
         } catch (e: any) {
             get().setErrorToast(`Clear library failed: ${e}`);
             console.error("Clear library failed:", e);
@@ -1089,8 +1093,12 @@ export const useStore = create<DJStore>((set, get) => ({
     importSpotifyPlaylist: async (playlistId: string) => {
         set({ spotifyImporting: true, spotifyImportProgress: null });
         try {
-            await invoke("spotify_import_playlist", { playlistId });
+            // Look up playlist name from cached Spotify playlists
+            const playlist = get().spotifyPlaylists.find(p => p.id === playlistId);
+            const playlistName = playlist?.name ?? "Spotify Import";
+            await invoke("spotify_import_playlist", { playlistId, playlistName });
             await get().fetchTracks();
+            await get().fetchPlaylists();
         } catch (e: any) {
             get().setErrorToast(`Spotify import failed: ${e}`);
         } finally {

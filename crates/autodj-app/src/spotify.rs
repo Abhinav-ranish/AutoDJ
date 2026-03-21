@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const SPOTIFY_AUTH_URL: &str = "https://accounts.spotify.com/authorize";
 const SPOTIFY_TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
-const REDIRECT_URI: &str = "http://localhost:9876/callback";
+const REDIRECT_URI: &str = "http://127.0.0.1:1420/callback";
 const SCOPES: &str = "playlist-read-private playlist-read-collaborative user-library-read";
 
 // ---------------------------------------------------------------------------
@@ -139,8 +139,8 @@ impl SpotifyClient {
     async fn wait_for_callback() -> Result<String, String> {
         // Run the blocking tiny_http server on a dedicated thread.
         tokio::task::spawn_blocking(|| {
-            let server = tiny_http::Server::http("127.0.0.1:9876")
-                .map_err(|e| format!("Failed to start callback server: {e}"))?;
+            let server = tiny_http::Server::http("127.0.0.1:1420")
+                .map_err(|e| format!("Failed to start callback server on port 1420: {e}"))?;
 
             // 120-second timeout
             let deadline = std::time::Instant::now() + Duration::from_secs(120);
@@ -509,6 +509,39 @@ impl SpotifyClient {
 
         Ok(genres)
     }
+    /// Fetch audio features (danceability, energy, valence, tempo) for a track.
+    pub async fn get_audio_features(
+        &self,
+        access_token: &str,
+        track_id: &str,
+    ) -> Result<(f64, f64, f64), String> {
+        let url = format!("https://api.spotify.com/v1/audio-features/{}", track_id);
+
+        let resp = self
+            .client
+            .get(&url)
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|e| format!("Audio features request failed: {e}"))?;
+
+        if !resp.status().is_success() {
+            // Audio features endpoint may not be available for all tracks
+            log::warn!("Audio features unavailable for track {}", track_id);
+            return Ok((0.5, 0.5, 0.5)); // defaults
+        }
+
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse audio features: {e}"))?;
+
+        let danceability = json["danceability"].as_f64().unwrap_or(0.5);
+        let energy = json["energy"].as_f64().unwrap_or(0.5);
+        let valence = json["valence"].as_f64().unwrap_or(0.5);
+
+        Ok((danceability, energy, valence))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -645,9 +678,29 @@ pub fn map_spotify_to_classification(
 // spotDL orchestration
 // ---------------------------------------------------------------------------
 
+/// Resolve the spotdl binary path, checking common Python user-bin locations.
+fn find_spotdl() -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        for candidate in &[
+            format!("{home}/Library/Python/3.9/bin/spotdl"),
+            format!("{home}/Library/Python/3.10/bin/spotdl"),
+            format!("{home}/Library/Python/3.11/bin/spotdl"),
+            format!("{home}/Library/Python/3.12/bin/spotdl"),
+            format!("{home}/Library/Python/3.13/bin/spotdl"),
+            format!("{home}/.local/bin/spotdl"),
+        ] {
+            if std::path::Path::new(candidate).exists() {
+                return candidate.clone();
+            }
+        }
+    }
+    "spotdl".to_string()
+}
+
 /// Check whether spotDL is installed and return its version string.
 pub fn check_spotdl() -> Result<String, String> {
-    let output = std::process::Command::new("spotdl")
+    let spotdl_bin = find_spotdl();
+    let output = std::process::Command::new(&spotdl_bin)
         .arg("--version")
         .output()
         .map_err(|_| {
@@ -676,11 +729,18 @@ pub async fn download_track(
         .await
         .map_err(|e| format!("Failed to create output directory: {e}"))?;
 
-    let output = tokio::process::Command::new("spotdl")
+    let spotdl_bin = find_spotdl();
+    // spotDL --output expects a format template, not a bare directory.
+    // The "output directory" is derived from the non-template prefix of the path.
+    let output_template = format!(
+        "{}/{{artists}} - {{title}}.{{output-ext}}",
+        output_dir.display()
+    );
+    let output = tokio::process::Command::new(&spotdl_bin)
         .arg("download")
         .arg(spotify_url)
         .arg("--output")
-        .arg(output_dir)
+        .arg(&output_template)
         .arg("--format")
         .arg("mp3")
         .arg("--bitrate")

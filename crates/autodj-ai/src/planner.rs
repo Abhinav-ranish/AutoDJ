@@ -807,115 +807,64 @@ impl AiPlanner {
         let incoming_has_drop = next_track.first_drop_ms.is_some();
 
         // ── Score each template ──────────────────────────────────────────────
-        // Phase 50: Lowered smooth_beatmix base from 0.50 → 0.35 to reduce dominance.
-        // Raised other competitive template bases so they can win without needing
-        // every condition to fire. Competition is now based on contextual fit.
+        // Phase 52: All templates have the SAME base score (0.40). The winner is
+        // determined purely by contextual bonuses. This ensures no single template
+        // dominates. Anti-repetition penalty + randomized tiebreaker handle variety.
         let mut template_candidates: Vec<(&str, f64, Vec<&str>)> = Vec::new();
 
-        // SmoothBeatmix — only wins when genuinely everything is aligned
+        // SmoothBeatmix — calm, aligned tracks
         {
-            let mut score = 0.35; // was 0.50 — systemically dominated before
-            if !genre_change && energy_jump.abs() < 0.15 {
+            let mut score = 0.40;
+            if !genre_change && energy_jump.abs() < 0.10 && bpm_diff < 3.0 {
                 score += 0.20;
             }
-            if near_outro {
-                score += 0.10;
-            }
-            if bpm_diff < 4.0 {
-                score += 0.10;
-            }
-            if vocal_overlap {
-                score -= 0.30;
-            }
-            template_candidates.push((
-                "smooth_beatmix",
-                score,
-                vec!["compatible", "smooth_beatmix"],
-            ));
+            if near_outro { score += 0.10; }
+            if vocal_overlap { score -= 0.25; }
+            // Penalty: boring for danceable/energetic tracks
+            if high_danceability && energy_jump.abs() > 0.05 { score -= 0.15; }
+            template_candidates.push(("smooth_beatmix", score, vec!["compatible", "smooth_beatmix"]));
         }
-        // FilterSweep — competitive for genre changes and builds
+        // FilterSweep — widely applicable
         {
-            let mut score = 0.35; // was 0.30
-            if trajectory_building {
-                score += 0.30;
-            }
-            if genre_change {
-                score += 0.25;
-            }
-            if energy_jump > 0.1 {
-                score += 0.20;
-            }
-            if near_breakdown {
-                score += 0.15;
-            }
+            let mut score = 0.40;
+            if trajectory_building { score += 0.20; }
+            if genre_change { score += 0.15; }
+            if energy_jump > 0.1 { score += 0.10; }
+            if near_breakdown { score += 0.10; }
             template_candidates.push(("filter_sweep", score, vec!["filter_sweep"]));
         }
-        // DropSwap — strong near a drop or building+incoming drop
+        // DropSwap — drops and energy builds
         {
-            let mut score = 0.25; // was 0.20
-            if near_drop {
-                score += 0.40;
-            }
-            if energy_jump > 0.2 {
-                score += 0.25;
-            }
-            if trajectory_building && incoming_has_drop {
-                score += 0.20;
-            }
-            if bpm_diff > 10.0 {
-                score -= 0.20;
-            }
+            let mut score = 0.40;
+            if near_drop { score += 0.30; }
+            if energy_jump > 0.2 { score += 0.15; }
+            if trajectory_building && incoming_has_drop { score += 0.20; }
+            if bpm_diff > 10.0 { score -= 0.15; }
             template_candidates.push(("drop_swap", score, vec!["drop_swap"]));
         }
-        // EchoDrop — jumps, genre-crossings, high BPM diff
+        // EchoDrop — genre-crossings, energy jumps
         {
-            let mut score = 0.20; // was 0.15
-            if energy_jump > 0.3 {
-                score += 0.30;
-            }
-            if bpm_diff > 10.0 {
-                score += 0.25;
-            }
-            if genre_change && energy_jump.abs() > 0.2 {
-                score += 0.20;
-            }
+            let mut score = 0.40;
+            if energy_jump > 0.15 { score += 0.20; }
+            if bpm_diff > 8.0 { score += 0.15; }
+            if genre_change { score += 0.15; }
             template_candidates.push(("echo_drop", score, vec!["echo_drop"]));
         }
-        // LoopRoll — complex rhythms and energy peaks
+        // LoopRoll — complex rhythms, energy peaks
         {
-            let mut score = 0.20; // was 0.15
-            if high_complexity {
-                score += 0.30;
-            }
-            if energy_jump > 0.25 {
-                score += 0.20;
-            }
-            if bpm_diff > 8.0 {
-                score += 0.15;
-            }
-            if near_drop {
-                score += 0.10;
-            }
+            let mut score = 0.40;
+            if high_complexity { score += 0.20; }
+            if energy_jump > 0.15 { score += 0.15; }
+            if near_drop { score += 0.15; }
             template_candidates.push(("loop_roll", score, vec!["loop_roll"]));
         }
-        // BassKillSwap — same genre, danceable
+        // BassKillSwap — only wins with specific conditions, not by default
         {
-            let mut score = 0.35; // was 0.30
-            if !genre_change {
-                score += 0.15;
-            }
-            if high_danceability {
-                score += 0.20;
-            }
-            if energy_jump.abs() < 0.15 {
-                score += 0.15;
-            }
-            if near_outro {
-                score += 0.10;
-            }
-            if vocal_overlap {
-                score -= 0.20;
-            }
+            let mut score = 0.40;
+            // Only gets bonuses when multiple conditions align
+            if !genre_change && high_danceability { score += 0.15; }
+            if near_outro && energy_jump.abs() < 0.10 { score += 0.10; }
+            if vocal_overlap { score -= 0.20; }
             template_candidates.push(("bass_kill_swap", score, vec!["bass_kill_swap"]));
         }
         // BreakBlend — vocals, mellowing, breakdowns
@@ -1051,22 +1000,27 @@ impl AiPlanner {
             .map(|(name, score, _)| (name.to_string(), *score))
             .collect();
 
-        // Phase 50: Use XOR-hash of track_id length + elapsed_ms nibble for tiebreaking.
-        // The old `elapsed_ms % 2` produced the same winner for all tracks at the
-        // same BPM because playback positions share the same modular bucket.
+        // Phase 51: Better tiebreaker using more entropy sources. When top candidates
+        // are close, pick among all candidates within 0.15 of the top score to give
+        // real variety across transitions.
         let tiebreak_pick = {
-            let id_len = next_track.track_id.len() as u64;
-            let nibble = context.current_state.elapsed_ms.wrapping_add(id_len);
-            (nibble ^ (nibble >> 4)) & 1
+            let id_bytes: u64 = next_track.track_id.as_bytes().iter()
+                .enumerate()
+                .fold(0u64, |acc, (i, &b)| acc.wrapping_add((b as u64).wrapping_mul(31u64.wrapping_pow(i as u32))));
+            let ms = context.current_state.elapsed_ms;
+            let dur = context.current_state.duration_ms;
+            let hash = id_bytes.wrapping_mul(6364136223846793005).wrapping_add(ms).wrapping_add(dur);
+            hash
         };
-        let (template_name, _, reasoning_tags) = if template_candidates.len() >= 2
-            && (template_candidates[0].1 - template_candidates[1].1) < 0.1
-        {
-            if tiebreak_pick == 0 {
-                template_candidates.remove(1)
-            } else {
-                template_candidates.remove(0)
-            }
+        // Collect all candidates within 0.15 of the top score
+        let top_score = template_candidates[0].1;
+        let competitive_count = template_candidates.iter()
+            .take_while(|tc| (top_score - tc.1) < 0.15)
+            .count()
+            .max(1);
+        let pick_idx = (tiebreak_pick as usize) % competitive_count;
+        let (template_name, _, reasoning_tags) = if competitive_count > 1 {
+            template_candidates.remove(pick_idx)
         } else {
             template_candidates.remove(0)
         };

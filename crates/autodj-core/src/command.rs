@@ -128,6 +128,14 @@ pub enum Command {
     ClearDelay { deck: DeckId },
     /// Jump to a named marker position (intro, drop, break, outro, first_beat).
     JumpToMarker { deck: DeckId, marker: String, position_ms: u64 },
+
+    // -- Phase 51: Reverb + Beat Jump --
+    /// Algorithmic reverb effect.
+    SetReverb { deck: DeckId, room_size: f32, damping: f32, wet: f32 },
+    /// Clear reverb effect.
+    ClearReverb { deck: DeckId },
+    /// Beat jump: seek forward or backward by `beats` beats relative to current position.
+    BeatJump { deck: DeckId, beats: i32 },
 }
 
 /// A command wrapped with scheduling and source metadata.

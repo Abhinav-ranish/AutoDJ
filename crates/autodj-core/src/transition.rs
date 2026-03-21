@@ -31,7 +31,8 @@ pub struct SmoothBeatmix;
 
 impl TransitionTemplate for SmoothBeatmix {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
-        let duration_bars = params["duration_bars"].as_u64().unwrap_or(16) as u32;
+        // Phase 52: Shorter default (8 bars, was 16). Incoming starts at -18dB (was -96dB).
+        let duration_bars = params["duration_bars"].as_u64().unwrap_or(8) as u32;
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
         let incoming_deck = if incoming_deck_str == "A" {
             DeckId::A
@@ -43,15 +44,15 @@ impl TransitionTemplate for SmoothBeatmix {
         } else {
             DeckId::A
         };
-        let bass_swap_bar = params["bass_swap_bar"].as_u64().unwrap_or(8) as u32;
+        let bass_swap_bar = params["bass_swap_bar"].as_u64().unwrap_or(4) as u32;
 
         let mut commands = Vec::new();
 
-        // 1. Initial State: Incoming deck plays silently
+        // 1. Initial State: Incoming deck plays quietly but audible
         commands.push(ScheduledCommand {
             command: Command::SetDeckGain {
                 deck: incoming_deck,
-                gain_db: -96.0,
+                gain_db: -18.0,
             },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
@@ -87,9 +88,9 @@ impl TransitionTemplate for SmoothBeatmix {
                 1.0 - (progress * 2.0)
             };
 
-            // Also ramp incoming gain up from silence to 0 dB in the first half of the transition
-            let in_gain = if progress < 0.5 {
-                -96.0 + (progress * 2.0 * 96.0)
+            // Ramp incoming gain from -18dB to 0dB over first 60% of transition
+            let in_gain = if progress < 0.6 {
+                -18.0 + (progress / 0.6 * 18.0)
             } else {
                 0.0
             };
@@ -162,6 +163,7 @@ pub struct FilterSweep;
 
 impl TransitionTemplate for FilterSweep {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
+        // Phase 52: Incoming starts at -15dB, not silence
         let duration_bars = params["duration_bars"].as_u64().unwrap_or(8) as u32;
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
         let incoming_deck = if incoming_deck_str == "A" {
@@ -183,7 +185,7 @@ impl TransitionTemplate for FilterSweep {
         commands.push(ScheduledCommand {
             command: Command::SetDeckGain {
                 deck: incoming_deck,
-                gain_db: -96.0,
+                gain_db: -15.0,
             },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
@@ -207,8 +209,8 @@ impl TransitionTemplate for FilterSweep {
             let log_end = end_hz.ln();
             let cutoff = (log_start + progress * (log_end - log_start)).exp();
 
-            // Incoming volume ramps up
-            let in_gain = -96.0 + (progress * 96.0);
+            // Incoming volume ramps up from -15dB
+            let in_gain = -15.0 + (progress * 15.0);
 
             // Outgoing volume ramps down slightly
             let out_gain = -(progress * 12.0);
@@ -663,8 +665,11 @@ pub struct BassKillSwap;
 
 impl TransitionTemplate for BassKillSwap {
     fn expand(&self, params: &Value) -> Result<Vec<ScheduledCommand>, String> {
-        let duration_bars = params["duration_bars"].as_u64().unwrap_or(16) as u32;
-        let bass_swap_bar = params["bass_swap_bar"].as_u64().unwrap_or(4) as u32;
+        // Phase 52: Shorter, punchier bass kill swap.
+        // Default 8 bars (was 16), bass swap at bar 2 (was 4).
+        // Incoming starts at -12dB (audible immediately, was -96dB).
+        let duration_bars = params["duration_bars"].as_u64().unwrap_or(8) as u32;
+        let bass_swap_bar = params["bass_swap_bar"].as_u64().unwrap_or(2) as u32;
         let incoming_deck_str = params["incoming_deck"].as_str().unwrap_or("B");
         let incoming_deck = if incoming_deck_str == "A" {
             DeckId::A
@@ -679,11 +684,11 @@ impl TransitionTemplate for BassKillSwap {
 
         let mut commands = Vec::new();
 
-        // Start incoming silently with bass killed
+        // Start incoming at -12dB (audible!) with bass killed
         commands.push(ScheduledCommand {
             command: Command::SetDeckGain {
                 deck: incoming_deck,
-                gain_db: -96.0,
+                gain_db: -12.0,
             },
             source: CommandSource::System,
             schedule: SchedulePoint::NextBar,
@@ -708,11 +713,11 @@ impl TransitionTemplate for BassKillSwap {
             target_sample: None,
         });
 
-        // Bring incoming volume up over bass_swap_bar bars (mids/highs only)
+        // Ramp incoming gain from -12dB to 0dB over bass_swap_bar bars
         let ramp_beats = bass_swap_bar * 4;
         for beat in 0..=ramp_beats {
             let progress = beat as f32 / ramp_beats as f32;
-            let in_gain = -96.0 + progress * 96.0;
+            let in_gain = -12.0 + progress * 12.0;
             commands.push(ScheduledCommand {
                 command: Command::SetDeckGain {
                     deck: incoming_deck,
@@ -746,12 +751,13 @@ impl TransitionTemplate for BassKillSwap {
             target_sample: None,
         });
 
-        // Fade outgoing down over remaining bars
-        let remaining_beats = (duration_bars - bass_swap_bar) * 4;
+        // Quick fade out of outgoing (4 bars max after bass swap)
+        let fade_bars = (duration_bars - bass_swap_bar).min(4);
+        let fade_beats = fade_bars * 4;
         let fade_start_beat = bass_swap_bar * 4;
-        for beat in 0..=remaining_beats {
-            let progress = beat as f32 / remaining_beats as f32;
-            let out_gain = -(progress * 96.0);
+        for beat in 0..=fade_beats {
+            let progress = beat as f32 / fade_beats as f32;
+            let out_gain = -(progress * 48.0);
             commands.push(ScheduledCommand {
                 command: Command::SetDeckGain {
                     deck: outgoing_deck,
@@ -763,18 +769,22 @@ impl TransitionTemplate for BassKillSwap {
             });
         }
 
-        // Crossfader to incoming side
-        let final_cf = if incoming_deck == DeckId::B {
-            1.0
-        } else {
-            -1.0
-        };
-        commands.push(ScheduledCommand {
-            command: Command::SetCrossfader { position: final_cf },
-            source: CommandSource::System,
-            schedule: SchedulePoint::AfterBars(duration_bars),
-            target_sample: None,
-        });
+        // Crossfader moves smoothly during transition
+        let total_beats = duration_bars * 4;
+        for beat in (0..=total_beats).step_by(4) {
+            let progress = beat as f32 / total_beats as f32;
+            let cf = if incoming_deck == DeckId::B {
+                -1.0 + (progress * 2.0)
+            } else {
+                1.0 - (progress * 2.0)
+            };
+            commands.push(ScheduledCommand {
+                command: Command::SetCrossfader { position: cf },
+                source: CommandSource::System,
+                schedule: SchedulePoint::AfterBeats(beat),
+                target_sample: None,
+            });
+        }
 
         // Finalize: pause outgoing, reset EQ
         commands.push(ScheduledCommand {
