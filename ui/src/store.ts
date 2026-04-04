@@ -337,7 +337,7 @@ interface DJStore {
 
     // Spotify Actions
     fetchSpotifyStatus: () => Promise<void>;
-    spotifyConnect: (clientId: string) => Promise<void>;
+    spotifyConnect: (clientId: string, clientSecret?: string) => Promise<void>;
     spotifyDisconnect: () => Promise<void>;
     fetchSpotifyPlaylists: () => Promise<void>;
     fetchSpotifyPlaylistTracks: (playlistId: string) => Promise<void>;
@@ -1054,9 +1054,9 @@ export const useStore = create<DJStore>((set, get) => ({
         }
     },
 
-    spotifyConnect: async (clientId: string) => {
+    spotifyConnect: async (clientId: string, clientSecret?: string) => {
         try {
-            await invoke("spotify_connect", { clientId });
+            await invoke("spotify_connect", { clientId, clientSecret: clientSecret || null });
             await get().fetchSpotifyStatus();
         } catch (e: any) {
             get().setErrorToast(`Spotify connect failed: ${e}`);

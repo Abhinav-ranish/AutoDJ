@@ -1336,6 +1336,7 @@ fn parse_deck(s: &str) -> Result<DeckId, String> {
 #[tauri::command]
 pub async fn spotify_connect(
     client_id: String,
+    client_secret: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let client = crate::spotify::SpotifyClient::new(&client_id);
@@ -1355,6 +1356,10 @@ pub async fn spotify_connect(
         .map_err(|e| format!("DB: {e}"))?;
     db.set_preference("spotify_client_id", &client_id)
         .map_err(|e| format!("DB: {e}"))?;
+    if let Some(ref secret) = client_secret {
+        db.set_preference("spotify_client_secret", secret)
+            .map_err(|e| format!("DB: {e}"))?;
+    }
 
     Ok(serde_json::json!({
         "connected": true,
@@ -1500,16 +1505,24 @@ pub async fn spotify_import_playlist(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     use tauri::Emitter;
+    log::info!("spotify_import_playlist called for playlist: {}", playlist_name);
 
     let token = get_valid_spotify_token(&state).await?;
-    let client_id = {
+    log::info!("Got valid Spotify token");
+    let (client_id, client_secret) = {
         let db = state.db.lock().map_err(|e| format!("DB lock: {e}"))?;
-        db.get_preference("spotify_client_id")
+        let cid = db.get_preference("spotify_client_id")
             .map_err(|e| format!("DB: {e}"))?
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let cs = db.get_preference("spotify_client_secret")
+            .map_err(|e| format!("DB: {e}"))?
+            .unwrap_or_default();
+        (cid, cs)
     };
     let client = crate::spotify::SpotifyClient::new(&client_id);
+    log::info!("Fetching playlist tracks from Spotify API...");
     let tracks = client.get_playlist_tracks(&token, &playlist_id).await?;
+    log::info!("Got {} tracks from Spotify", tracks.len());
 
     let total = tracks.len();
     let mut imported = 0u32;
@@ -1551,7 +1564,7 @@ pub async fn spotify_import_playlist(
 
         // Download via spotDL
         let downloaded_path =
-            match crate::spotify::download_track(&track.spotify_url, &download_dir).await {
+            match crate::spotify::download_track(&track.spotify_url, &download_dir, Some(&client_id), Some(&client_secret)).await {
                 Ok(p) => p,
                 Err(e) => {
                     log::error!("Failed to download {}: {e}", track_label);
@@ -1570,8 +1583,10 @@ pub async fn spotify_import_playlist(
             };
 
         // Import into library
+        log::info!("Importing downloaded file for: {}", track_label);
         let path_str = downloaded_path.to_string_lossy().to_string();
         let import_result = import_files(vec![path_str], state.clone()).await;
+        log::info!("Import complete for: {}", track_label);
         let track_ids = match import_result {
             Ok(ids) => ids,
             Err(e) => {
@@ -1586,12 +1601,14 @@ pub async fn spotify_import_playlist(
             playlist_track_ids.push(track_id.clone());
 
             // Fetch artist genres
+            log::info!("Fetching artist genres for: {}", track_label);
             let genres = client
                 .get_artist_genres(&token, &track.artist_id)
                 .await
                 .unwrap_or_default();
 
             // Fetch real audio features from Spotify API
+            log::info!("Fetching audio features for: {}", track_label);
             let (danceability, energy, valence) = client
                 .get_audio_features(&token, &track.id)
                 .await

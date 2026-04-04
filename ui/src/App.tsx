@@ -33,11 +33,13 @@ function LibraryPage() {
 function SpotifyPage() {
     const { spotifyStatus, spotifyConnect, spotifyDisconnect, fetchSpotifyStatus, savePreference, loadPreference } = useStore();
     const [clientId, setClientId] = useState("");
+    const [clientSecret, setClientSecret] = useState("");
     const [connecting, setConnecting] = useState(false);
 
     useEffect(() => {
         fetchSpotifyStatus();
         loadPreference("spotify_client_id").then(v => { if (v) setClientId(v); });
+        loadPreference("spotify_client_secret").then(v => { if (v) setClientSecret(v); });
     }, []);
 
     const handleConnect = async () => {
@@ -45,7 +47,10 @@ function SpotifyPage() {
         setConnecting(true);
         try {
             await savePreference("spotify_client_id", clientId.trim());
-            await spotifyConnect(clientId.trim());
+            if (clientSecret.trim()) {
+                await savePreference("spotify_client_secret", clientSecret.trim());
+            }
+            await spotifyConnect(clientId.trim(), clientSecret.trim() || undefined);
         } catch (err) {
             console.error("Spotify connect error:", err);
         } finally {
@@ -86,8 +91,16 @@ function SpotifyPage() {
                             onChange={(e) => setClientId(e.target.value)}
                             className="spotify-page-input"
                         />
+                        <label className="spotify-page-label" style={{ marginTop: "8px" }}>Client Secret</label>
+                        <input
+                            type="password"
+                            placeholder="Enter your Spotify Client Secret"
+                            value={clientSecret}
+                            onChange={(e) => setClientSecret(e.target.value)}
+                            className="spotify-page-input"
+                        />
                         <span className="spotify-page-hint">
-                            Get one at developer.spotify.com
+                            Get both at developer.spotify.com &gt; Your App &gt; Settings
                         </span>
                         <button
                             onClick={handleConnect}

@@ -98,7 +98,10 @@ pub struct SpotifyClient {
 impl SpotifyClient {
     pub fn new(client_id: &str) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             client_id: client_id.to_string(),
         }
     }
@@ -678,16 +681,18 @@ pub fn map_spotify_to_classification(
 // spotDL orchestration
 // ---------------------------------------------------------------------------
 
-/// Resolve the spotdl binary path, checking common Python user-bin locations.
+/// Resolve the spotdl binary path, preferring pipx/newer Python installs over
+/// the macOS system Python 3.9 (which yt-dlp no longer supports).
 fn find_spotdl() -> String {
     if let Ok(home) = std::env::var("HOME") {
         for candidate in &[
-            format!("{home}/Library/Python/3.9/bin/spotdl"),
-            format!("{home}/Library/Python/3.10/bin/spotdl"),
-            format!("{home}/Library/Python/3.11/bin/spotdl"),
-            format!("{home}/Library/Python/3.12/bin/spotdl"),
-            format!("{home}/Library/Python/3.13/bin/spotdl"),
+            // Prefer pipx install (uses a modern Python automatically)
             format!("{home}/.local/bin/spotdl"),
+            // Then Homebrew Python versions, newest first
+            format!("{home}/Library/Python/3.13/bin/spotdl"),
+            format!("{home}/Library/Python/3.12/bin/spotdl"),
+            format!("{home}/Library/Python/3.11/bin/spotdl"),
+            format!("{home}/Library/Python/3.10/bin/spotdl"),
         ] {
             if std::path::Path::new(candidate).exists() {
                 return candidate.clone();
@@ -719,10 +724,13 @@ pub fn check_spotdl() -> Result<String, String> {
 }
 
 /// Download a Spotify track using spotDL and return the path to the
-/// downloaded MP3 file.
+/// downloaded MP3 file.  Pass the user's `client_id` so spotDL uses their
+/// own Spotify app credentials instead of the shared (rate-limited) defaults.
 pub async fn download_track(
     spotify_url: &str,
     output_dir: &std::path::Path,
+    client_id: Option<&str>,
+    client_secret: Option<&str>,
 ) -> Result<std::path::PathBuf, String> {
     // Ensure output directory exists.
     tokio::fs::create_dir_all(output_dir)
@@ -736,22 +744,34 @@ pub async fn download_track(
         "{}/{{artists}} - {{title}}.{{output-ext}}",
         output_dir.display()
     );
-    let output = tokio::process::Command::new(&spotdl_bin)
-        .arg("download")
+    let mut cmd = tokio::process::Command::new(&spotdl_bin);
+    cmd.arg("download")
         .arg(spotify_url)
         .arg("--output")
         .arg(&output_template)
         .arg("--format")
         .arg("mp3")
         .arg("--bitrate")
-        .arg("320k")
-        .output()
+        .arg("320k");
+
+    // Pass the user's Spotify app credentials so spotDL avoids shared rate limits.
+    if let Some(cid) = client_id.filter(|s| !s.is_empty()) {
+        cmd.arg("--client-id").arg(cid);
+    }
+    if let Some(secret) = client_secret.filter(|s| !s.is_empty()) {
+        cmd.arg("--client-secret").arg(secret);
+    }
+
+    let output = cmd.output()
         .await
         .map_err(|e| format!("Failed to run spotdl: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("spotdl download failed: {stderr}"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // spotDL sometimes writes errors to stdout (e.g. rate-limit messages)
+        let detail = if stderr.trim().is_empty() { &stdout } else { &stderr };
+        return Err(format!("spotdl download failed: {}", detail.trim()));
     }
 
     // Find the newest .mp3 file in the output directory.
